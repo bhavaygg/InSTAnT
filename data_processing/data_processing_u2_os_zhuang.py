@@ -4,26 +4,7 @@ import time
 import scipy.io
 import pickle
 
-class DataLoaderFiltered:
-    def __init__(self,csv_path,codebook_path) -> None:
-        super().__init__()
-        start_time = time.time()
-        self.csv_path = csv_path
-        self.codebook_path = codebook_path
-        self.df = self.load_data()
-        print('time taken to load data', time.time() - start_time)
 
-    def load_data(self):
-        df = pd.read_csv(self.csv_path)
-        bid_to_gname = pd.read_csv(self.codebook_path)
-        bid_to_gname = bid_to_gname.name.values
-        self.geneList = list(bid_to_gname)
-        df['geneName'] = df['barcode_id'].apply(lambda x : bid_to_gname[x-1])
-        
-        df = df.rename(columns={'cell_id': 'uID', 'global_x': 'absX', 'global_y': 'absY', 'in_nuc' : 'inNucleus','dist_nuc':'distNucleus','dist_periphery':'distPeriphery'})
-        df = df[['uID','absX','absY','geneName','inNucleus','distNucleus','distPeriphery']]
-        df = df.set_index('geneName')
-        return df
 
 class DataLoader():
     def __init__(self, exp_path, codebook_path, min_intensity = 0, min_area = 0):

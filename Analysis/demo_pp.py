@@ -1,8 +1,8 @@
 # %pylab inline
 from __future__ import division
 import time
-import data_processing
-import PP
+# import data_processing
+# import PP
 from data_processing.data_processing_u2_os_zhuang import DataLoader
 from PP.proximal_pairs import ProximalPairs
 import numpy as np
@@ -11,8 +11,8 @@ import os
 
 
 #####Data processing ###
-dir_zhuang = '/Users/anurendrakumar/Desktop/Data/Zhuang_u2os/'
-rep = 'rep3'
+dir_zhuang = '/Users/anurendrakumar/Desktop/1Nature_paper/Data/Zhuang_u2os/'
+rep = 'rep2'
 data_path = dir_zhuang + rep +  '/data.csv'
 codebook_path = dir_zhuang + 'codebook.csv'
 min_intensity = 10**0.75
@@ -26,7 +26,7 @@ cell_id_list = dataset.df.uID.unique()
 num_cells = len(cell_id_list)
 print('num cells', num_cells)
 
-save_dir = '/Users/anurendrakumar/Desktop/Results/Zhuang_u2os/' +  'PP_results/' 
+save_dir = '/Users/anurendrakumar/Desktop/1Nature_paper/Results_final/Zhuang_u2os/' +  'PP_results/' 
 
 
 if not os.path.exists(save_dir):

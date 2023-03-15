@@ -6,8 +6,11 @@ import pickle
 import os
 # setting path
 
-from poisson_binomial import PoissonBinomial
-from poibin import PoiBin
+import sys
+
+from CPB.poibin import PoiBin
+from CPB.poisson_binomial import PoissonBinomial
+
 
 class ConditionalGlobalColocalization():
     def __init__(self, all_cell_p_val, transcript_count, alpha_cellwise = 0.01, min_transcript = 0, show_det_pairs = 0):

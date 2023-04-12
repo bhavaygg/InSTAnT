@@ -10,6 +10,7 @@ from collections import Counter
 from scipy.sparse import coo_matrix
 import multiprocessing as mp
 from sys import getsizeof
+import concurrent.futures
 
 from InSTAnT.poibin import PoiBin
 from InSTAnT.poisson_binomial import PoissonBinomial
@@ -72,7 +73,7 @@ class ConditionalGlobalColocalization():
         expected_coloc = np.zeros((self.num_genes, self.num_genes))
         start = timeit.default_timer()
         pool = mp.Pool(self.threads)
-        results = pool.map(self._compute_pval, [[i, j] for i in range(self.num_genes)for j in range(i, self.num_genes)])
+        results = pool.map(self._compute_pval, [[i, j] for i in range(self.num_genes) for j in range(i, self.num_genes)])
         for genepair_ij_result in results:
             i, j = genepair_ij_result[0], genepair_ij_result[1]
             coloc_matrix[i,j], expected_coloc[i,j] = genepair_ij_result[2], genepair_ij_result[3]
@@ -108,12 +109,6 @@ class ProximalPairs():
                 p_vals[i,j] = binom_test(self.obs[i,j], self.num_trial[i,j], \
                 self.prob_null, alternative = 'greater')
                 p_vals[j,i] = p_vals[i,j]
-        #print("def", timeit.default_timer()- start)
-        #start = timeit.default_timer()
-        #p_vals_ray = np.array(ray.get([get_binomial.remote(i, j, self.obs[i,j], self.num_trial[i,j], self.prob_null) for i in range(self.obs.shape[0]) for j in range(i,self.obs.shape[1])]))
-        #p_vals_ray = coo_matrix((p_vals_ray[:, 2], (np.array(p_vals_ray[:, 0], dtype=int), np.array(p_vals_ray[:, 1], dtype=int)))).toarray()
-        #print("ray", timeit.default_timer()- start)
-        round(getsizeof(p_vals) / 1024 / 1024,2)
         return p_vals
 
     def prob_null_hypothesis(self):
@@ -159,7 +154,15 @@ class Instant():
         #logging.debug('Time taken to load data', timeit.default_timer() - start_time)
 
     def load_preprocessed_data(self, data):
+        self.filename = data
         self.df = pd.read_csv(data, index_col=0)
+        self.geneList = self.df.index.unique()
+    
+    def load_preprocessed_data_random(self, data, num_cells = 5000):
+        self.df = pd.read_csv(data, index_col=0)
+        cell_ids = self.df.uID.unique()
+        random_cell_ids = np.random.choice(cell_ids, num_cells, replace=False)
+        self.df = self.df.loc[self.df.uID.isin(random_cell_ids)]
         self.geneList = self.df.index.unique()
 
     def preprocess_and_load_data(self, expression_data, barcode_data):
@@ -194,24 +197,9 @@ class Instant():
         #print(f"Running PP for {len(self.df[self.df.uID == cell_id])} transcripts at cell ID {cell_id}" )
         #cell_num, df_loc = args[0], args[1]
         #pp_model = ProximalPairs(geneList = self.geneList, df_loc = df_loc, distance_threshold = self.distance_threshold)
-        pp_model = ProximalPairs(geneList = self.geneList, df_loc = self.df[self.df.uID == cell_id][['absX', 'absY']], distance_threshold = self.distance_threshold)
+        pp_model = ProximalPairs(geneList = self.geneList, df_loc = self.df_batch.loc[self.df_batch.uID == cell_id][['absX', 'absY']], distance_threshold = self.distance_threshold)
         #print("Completed PP in ", timeit.default_timer() - start)
         return cell_num, pp_model.p_vals, pp_model.genecount.values.reshape(len(self.geneList))
-    
-
-    def _create_pval_mat(self, num_cells, len_genes):
-        shared_arr = np.ones((num_cells, len_genes, len_genes))
-        shared_mem = mp.shared_memory.SharedMemory(create=True, size=shared_arr.nbytes)
-        pval_mat = np.ndarray(shared_arr.shape, buffer=shared_mem.buf)
-        pval_mat[:] = shared_arr[:] 
-        return shared_mem, pval_mat
-    
-    def _create_genecount_mat(self, num_cells, len_genes):
-        shared_arr = np.zeros((num_cells, len_genes))
-        shared_mem = mp.shared_memory.SharedMemory(create=True, size=shared_arr.nbytes)
-        genecount_mat = np.ndarray(shared_arr.shape, buffer=shared_mem.buf)
-        genecount_mat[:] = shared_arr[:] 
-        return shared_mem, genecount_mat
 
     def _save_pval_matrix(self, filename):
         with open(filename, 'wb') as fp:
@@ -244,55 +232,86 @@ class Instant():
         #     else:
         #         print('min genecount less than', min_genecount)
 
+    def run_ProximalPairs_parallel(self, distance_threshold, min_genecount, pval_matrix_name = None, gene_count_name = None):
+        self.distance_threshold = distance_threshold
+        cell_ids = self.df.uID.unique()
+        num_cells = len(cell_ids)
+        print(f"Running PP now on {self.threads} threads, {mp.cpu_count()}")
+        print("Number of cells: ", len(cell_ids), ", Number of Genes: ", len(self.geneList))
+        start = timeit.default_timer()
+        for n, i in enumerate(range(0, num_cells, 500)):
+            print(f"Batc")
+            self.df = pd.read_csv(self.filename, index_col=0)
+            batch_cell_ids = cell_ids[i : i+500]
+            valid_cell_data = []
+            self.df_batch = self.df.loc[self.df.uID.isin(batch_cell_ids)]
+            del self.df
+            num_transcripts = 0
+            for i, cell_id in enumerate(batch_cell_ids):
+                num_transcripts += self.df_batch.loc[self.df_batch.uID == cell_id].shape[0]
+                print(self.df_batch.loc[self.df_batch.uID == cell_id].shape)
+                if self.df_batch[self.df_batch.uID == cell_id].shape[0] > min_genecount:
+                    valid_cell_data.append([i, cell_id])
+                else:
+                    print(f"min genecount less than {min_genecount} for cell id {cell_id}, Skipping ...")
+            check = timeit.default_timer()
+            pool = mp.Pool(processes = self.threads)
+            print(f"Running PP now on {self.threads} threads for cell batch {n}, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
+            results = pool.map(self._calculate_ProximalPairs, valid_cell_data)
+            print(f"Done")  
+            with open(pval_matrix_name[:-4]+f"_batch_{n}_results.pkl", 'wb') as fp:
+                pickle.dump(results, fp)
+            #for cell_i_result in results:
+            #    self.all_pval[cell_i_result[0]] = cell_i_result[1]
+            #    self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
+            print(f"Time to complete PP for cell batch {n}: ", timeit.default_timer() - check)
+
+            #if pval_matrix_name:
+            #    self._save_pval_matrix(pval_matrix_name[:-4]+f"_batch_{n}.pkl")
+            #if gene_count_name:
+            #    self._save_gene_count(gene_count_name+f"_batch_{n}.pkl")
+        
+        # if pval_matrix_name:
+        #     self._save_pval_matrix(pval_matrix_name)
+        # if gene_count_name:
+        #     self._save_gene_count(gene_count_name)
+        print(f"Cell-wise Proximal Pairs Time : {round(timeit.default_timer() - start, 2)} seconds")
+    
     def run_ProximalPairs(self, distance_threshold, min_genecount, pval_matrix_name = None, gene_count_name = None):
         self.distance_threshold = distance_threshold
         cell_ids = self.df.uID.unique()
         num_cells = len(cell_ids)
+        print(f"Running PP now on {self.threads} threads, {mp.cpu_count()}")
         print("Number of cells: ", len(cell_ids), ", Number of Genes: ", len(self.geneList))
         start = timeit.default_timer()
-        self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
-        print(round(getsizeof(self.all_pval) / 1024 / 1024 / 1024, 2))
-        self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = np.float16) 
-        print(round(getsizeof(self.all_gene_count) / 1024 / 1024 / 1024, 2))
         valid_cell_data = []
-
-        
-
+        self.df_batch = self.df.loc[self.df.uID.isin(cell_ids)]
+        del self.df
+        num_transcripts = 0
         for i, cell_id in enumerate(cell_ids):
-           #df_id = self.df[self.df.uID == cell_id]
-           df_id = self.df[self.df.uID == cell_id].copy()
-           if self.df[self.df.uID == cell_id].shape[0] > min_genecount:
-               #valid_cell_data.append([i, df_id])
-               valid_cell_data.append([i, cell_id])
-               #valid_cell_data.append([i, self.df[self.df.uID == cell_id][['absX', 'absY']]])
-           else:
-               print('min genecount less than', min_genecount)
-        #    if len(valid_cell_data) % 8 == 0 and len(valid_cell_data) > 0:
-        #        print(f"Running PP now on {self.threads} threads, iter {i}, {len(valid_cell_data)}")
-        #        pool = mp.Pool(self.threads)
-        #        check = timeit.default_timer()
-        #        #print(round(getsizeof(valid_cell_data) / 1024 / 1024,2), "MB")
-        #        results = pool.map(self._calculate_ProximalPairs, valid_cell_data)
-        #        for cell_i_result in results:
-        #            self.all_pval[cell_i_result[0]] = cell_i_result[1]
-        #            self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
-        #        valid_cell_data = []
-        #        print("TIme for 1 PP: ", timeit.default_timer() - check)
-        if len(valid_cell_data) > 0:
-            check = timeit.default_timer()
-            pool = mp.Pool(self.threads)
-            print(f"Running PP now on {self.threads} threads")
-            #print(round(getsizeof(valid_cell_data) / 1024 / 1024,2), "MB")
-            results = pool.map(self._calculate_ProximalPairs, valid_cell_data)
-            for cell_i_result in results:
-                self.all_pval[cell_i_result[0]] = cell_i_result[1]
-                self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
-            print("TIme for 1 PP: ", timeit.default_timer() - check)
-
+            num_transcripts += self.df_batch.loc[self.df_batch.uID == cell_id].shape[0]
+            print(self.df_batch.loc[self.df_batch.uID == cell_id].shape)
+            if self.df_batch[self.df_batch.uID == cell_id].shape[0] > min_genecount:
+                valid_cell_data.append([i, cell_id])
+            else:
+                print(f"min genecount less than {min_genecount} for cell id {cell_id}, Skipping ...")
+        check = timeit.default_timer()
+        pool = mp.Pool(processes = self.threads)
+        print(f"Running PP now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
+        results = pool.map(self._calculate_ProximalPairs, valid_cell_data)
+        print(f"Done")  
+        #with open(pval_matrix_name[:-4]+f"_batch_{n}_results.pkl", 'wb') as fp:
+        #    pickle.dump(results, fp)
+        self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
+        self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = np.float16) 
+        for cell_i_result in results:
+            self.all_pval[cell_i_result[0]] = cell_i_result[1]
+            self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
+        print(f"Time to complete PP : ", timeit.default_timer() - check)
         if pval_matrix_name:
-            self.save_pval_matrix(pval_matrix_name)
+            self._save_pval_matrix(pval_matrix_name)
         if gene_count_name:
-            self.save_gene_count(gene_count_name)
+            self._save_gene_count(gene_count_name)
         print(f"Cell-wise Proximal Pairs Time : {round(timeit.default_timer() - start, 2)} seconds")
 
     def _save_globcolocal_csv(self, filename):
@@ -335,7 +354,10 @@ class Instant():
         pairwise_p_val_df = pairwise_p_val_df.sort_values(by=['p_val_cond'])
         return pairwise_p_val_df
     
-    def run_GlobalColocalization(self, alpha_cellwise = 0.01, min_transcript = 0, show_det_pairs = 0, high_precision = False, glob_coloc_name = None, exp_coloc_name = None, unstacked_pvals_name = None):
+    def run_GlobalColocalization(self, g = None, alpha_cellwise = 0.01, min_transcript = 0, show_det_pairs = 0, high_precision = False, glob_coloc_name = None, exp_coloc_name = None, unstacked_pvals_name = None):
+        print(f"Running GCL now on {self.threads} threads")
+        #self.geneList = pd.read_csv(g, index_col=0).index.unique()
+        start = timeit.default_timer()
         global_coloc_model = ConditionalGlobalColocalization(all_cell_pval = self.all_pval, transcript_count = self.all_gene_count, alpha_cellwise = alpha_cellwise, min_transcript = min_transcript, show_det_pairs = show_det_pairs, threads = self.threads, high_precision = high_precision)
         global_coloc, expected_coloc = global_coloc_model.global_colocalization()
         self.global_coloc_df = pd.DataFrame(global_coloc, index = self.geneList, columns = self.geneList)
@@ -348,3 +370,4 @@ class Instant():
         #self.expected_coloc_df = pd.read_csv(exp_coloc_name, index_col=0)
         if unstacked_pvals_name:
             self._save_unstacked_pvals(unstacked_pvals_name, alpha_cellwise, min_transcript)
+        print(f"Cell-wise Global Colocalization Time : {round(timeit.default_timer() - start, 2)} seconds")

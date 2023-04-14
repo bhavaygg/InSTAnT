@@ -149,7 +149,7 @@ class PoiBin(object):
         self.check_rv_input(number_successes)
         i = 0
         try:
-            isinstance(number_successes, collections.Iterable)
+            #isinstance(number_successes, collections.Iterable)
             pvalues = np.array(number_successes, dtype='float')
             # if input is iterable (list, numpy.array):
             for k in number_successes:

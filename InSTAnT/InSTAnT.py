@@ -1,16 +1,12 @@
 import pandas as pd
 import numpy as np
-import scipy.io
 import pickle
 import timeit
-import logging
 from scipy.spatial import cKDTree
 from scipy.stats import binom_test
 from collections import Counter
 from scipy.sparse import coo_matrix
 import multiprocessing as mp
-from sys import getsizeof
-import concurrent.futures
 from sklearn.neighbors import NearestNeighbors
 from InSTAnT.poibin import PoiBin
 from InSTAnT.poisson_binomial import PoissonBinomial
@@ -638,15 +634,20 @@ class Instant():
                 )
         return cell_num, np.concatenate(stats_list, axis=1).T
 
-    def run_bento_clq(self, n_neighbors=25, radius=None, min_genecount = 20, min_count=5, permutations=10, random = None, nofilter = 0):
+    def run_bento_clq(self, n_neighbors=25, radius=None, min_genecount = 20, min_count=5, permutations=10, nofilter = 0):
+        '''
+        Function to run bento colocalization. Bento's code is converted a bit to match our data handling.
+        Requires data to be loaded using appropriate loading function.
+        Arguments: 
+            - n_neighbors: (Integer) Number of nearest gene neighbours to consider.
+            - radius: (Integer) Radius to search for neighbors around a gene. If specified, set `n_neighbors` to None.
+            - min_genecount: (Integer) Minimum number of transcripts in each cell.
+            - min_count: (Integer) Minimum threshold of transcripts a gene must have in each cell.
+        '''
         self.min_count = min_count
         self.n_neighbors = n_neighbors
         self.permutations = permutations
         self.radius = radius
-        if random == True:
-            print("random")
-            self.df.index = np.random.permutation(self.df.index)
-            self.df.index.name = 'gene'
         cell_ids = self.df.uID.unique()
         num_cells = len(cell_ids)
         print(f"Running Bento coloc now on {self.threads} threads, {mp.cpu_count()}")

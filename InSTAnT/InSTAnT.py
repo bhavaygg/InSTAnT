@@ -202,6 +202,51 @@ class Instant():
         self.filename = data
         self.df = pd.read_csv(data, index_col=0)
         self.df.index = np.random.permutation(self.df.index.values)
+        self.geneList = self.df.index.unique()
+    
+    def load_preprocessed_data_filter(self, data, threshold = 100):
+        '''
+        Load preprocessed data and filter cells to ensure that minimum threshold transcripts are present.
+        Data should have the following columns - 
+        ['gene', 'absX', 'absY', 'uID'] with 'gene' being the 1st column
+            Arguments: 
+                - data: (String) Path to dataframe in the required format.
+                - threshold: (Integer) Minimum number of transcripts in each cell.
+        '''
+        self.df = pd.read_csv(data, index_col=0)
+        threshold_cells = self.df.groupby('uID').size()
+        threshold_cells = threshold_cells[threshold_cells > threshold].index.values
+        self.df = self.df.loc[self.df.uID.isin(threshold_cells)]
+        cell_ids = self.df.uID.unique()
+        self.geneList = self.df.index.unique()
+    
+    def load_preprocessed_data_filter_genes(self, data, threshold = 100):
+        self.df = pd.read_csv(data, index_col=0)
+        threshold_cells = self.df.groupby('uID').size()
+        threshold_cells = threshold_cells[threshold_cells > threshold].index.values
+        self.df = self.df.loc[self.df.uID.isin(threshold_cells)]
+        threshold_genes = self.df.groupby('gene').size().sort_values(ascending=False).index.values[:100]
+        self.df = self.df.loc[self.df.gene.isin(threshold_genes)]
+        cell_ids = self.df.uID.unique()
+        self.geneList = self.df.index.unique()
+    
+    def load_preprocessed_data_random(self, data, num_cells = 5000):
+        self.df = pd.read_csv(data, index_col=0)
+        cell_ids = self.df.uID.unique()
+        random_cell_ids = np.random.choice(cell_ids, num_cells, replace=False)
+        self.df = self.df.loc[self.df.uID.isin(random_cell_ids)]
+        self.geneList = self.df.index.unique()
+    
+    def load_preprocessed_data_randomize(self, data):
+        '''
+        Load preprocessed data and randomize the genes (to establish baselines). Data should have the following columns - 
+            ['gene', 'absX', 'absY', 'uID'] with 'gene' being the 1st column
+            Arguments: 
+                - data: (String) Path to dataframe in the required format.
+        '''
+        self.filename = data
+        self.df = pd.read_csv(data, index_col=0)
+        self.df.index = np.random.permutation(self.df.index.values)
         self.df.index.name = 'gene'
         self.geneList = self.df.index.unique()
     

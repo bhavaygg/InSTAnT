@@ -16,6 +16,18 @@ from InSTAnT.poibin import PoiBin
 from InSTAnT.poisson_binomial import PoissonBinomial
 
 class ConditionalGlobalColocalization():
+    '''
+        Performs conditional gloval colocalization
+        Requires output from ProximalPairs()
+        Arguments: 
+            - all_cell_pval: (Array) Gene-Gene pairwise pvalues for all cells calcuated using ProximalPairs().
+            - transcript_count: (Array) Expression count of each gene across each cell.
+            - alpha_cellwise: (Float) pvalue signifcance threshold (>alpha_cellwise are converted to 1).
+            - min_transcript: (Float) Gene expression lower threshold.
+            - show_det_pairs: (Not used)
+            - high_precision: (Boolean) High precision pvalue. Expect longer computer.
+            - threads: (Integer) Number of threads to use.
+    '''
     def __init__(self, all_cell_pval, transcript_count, alpha_cellwise = 0.01, min_transcript = 0, show_det_pairs = 0, high_precision = False, threads = 1):
         self.all_cell_pval = all_cell_pval
         self.alpha, self.show_det_pairs = alpha_cellwise, show_det_pairs
@@ -87,6 +99,14 @@ class ConditionalGlobalColocalization():
     
 
 class ProximalPairs():
+    '''
+        Calculates proximal pairs for all gene-gene pairs for a given cell.
+        Arguments: 
+            - geneList: (Array) List of genes.
+            - df_loc: (DataFrame) Coordinates of the gene transcript.
+            - distance_threshold: (Integer) distance threshold at which to consider 2 genes proximal.
+            - mode: (Not used).
+    '''
     def __init__(self, geneList, df_loc, distance_threshold, mode="normal"):
         self.geneList = geneList
         #self.orig_df = df_loc.copy()
@@ -146,19 +166,51 @@ class ProximalPairs():
     
 
 class Instant():
+    '''
+    Intracellular Spatial Transcriptomic Analysis Toolkit (InSTAnT).
+    This class is used to calculate the proximal gene pairs in each cell and 
+    used to find which gene pairs are d-cololocalised across all the cells.
+        Arguments: 
+            - threads: (Integer) Number of threads to use.
+            - min_intensity: (Optional) (Integer) Minimum intensity for Merfish.
+            - min_area: (Optional) (Integer) Minimum Area for Merfish.
+    '''
     def __init__(self, threads = 1, min_intensity = 0, min_area = 0):
-        start_time = timeit.default_timer()
         self.min_intensity, self.min_area = min_intensity, min_area
         self.threads = threads
-        #self.df = self.load_data()
-        #logging.debug('Time taken to load data', timeit.default_timer() - start_time)
 
     def load_preprocessed_data(self, data):
+        '''
+        Load preprocessed data. Data should have the following columns - 
+            ['gene', 'absX', 'absY', 'uID'] with 'gene' being the 1st column
+            Arguments: 
+                - data: (String) Path to dataframe in the required format.
+        '''
         self.filename = data
         self.df = pd.read_csv(data, index_col=0)
         self.geneList = self.df.index.unique()
     
+    def load_preprocessed_data_randomize(self, data):
+        '''
+        Load preprocessed data and randomize the genes (to establish baselines). Data should have the following columns - 
+            ['gene', 'absX', 'absY', 'uID'] with 'gene' being the 1st column
+            Arguments: 
+                - data: (String) Path to dataframe in the required format.
+        '''
+        self.filename = data
+        self.df = pd.read_csv(data, index_col=0)
+        self.df.index = np.random.permutation(self.df.index.values)
+        self.geneList = self.df.index.unique()
+    
     def load_preprocessed_data_filter(self, data, threshold = 100):
+        '''
+        Load preprocessed data and filter cells to ensure that minimum threshold transcripts are present.
+        Data should have the following columns - 
+        ['gene', 'absX', 'absY', 'uID'] with 'gene' being the 1st column
+            Arguments: 
+                - data: (String) Path to dataframe in the required format.
+                - threshold: (Integer) Minimum number of transcripts in each cell.
+        '''
         self.df = pd.read_csv(data, index_col=0)
         threshold_cells = self.df.groupby('uID').size()
         threshold_cells = threshold_cells[threshold_cells > threshold].index.values
@@ -184,10 +236,16 @@ class Instant():
         self.geneList = self.df.index.unique()
 
     def preprocess_and_load_data(self, expression_data, barcode_data):
+        '''
+        Data Loading and preprocessing for Merfish data.
+            Arguments: 
+                - expression_data: (String) Path to expression data csv file.
+                - barcode_data: (String) Path to expression data csv file.
+        '''
         self.expression_data = expression_data
         self.barcode_data = barcode_data
         df = pd.read_csv(self.expression_data)
-        codebook = self.load_codebook()
+        codebook = self._load_codebook()
         df = df[df.normalized_intensity > self.min_intensity] #moved up
         df = df[df.area >= self.min_area] #moved up
         df['geneName'] = df['barcode'].apply(lambda x: codebook.loc[x,'name'])
@@ -196,7 +254,7 @@ class Instant():
         df = df.drop(['barcode', 'area','is_exact', 'normalized_intensity'],axis=1)  
         self.df = df.set_index('geneName')
     
-    def load_codebook(self):
+    def _load_codebook(self):
         codebook = pd.read_csv(self.barcode_data, converters={'bit_barcode': lambda x: int(str(x)[::-1],2)})
         codebook = codebook[['name', 'bit_barcode']]
         codebook.rename(columns={'bit_barcode': 'barcode'}, inplace=True)
@@ -210,13 +268,8 @@ class Instant():
         return self.df.uID.unique()
     
     def _calculate_ProximalPairs(self, args):
-        start = timeit.default_timer()
         cell_num, cell_id = args[0], args[1]
-        #print(f"Running PP for {len(self.df[self.df.uID == cell_id])} transcripts at cell ID {cell_id}" )
-        #cell_num, df_loc = args[0], args[1]
-        #pp_model = ProximalPairs(geneList = self.geneList, df_loc = df_loc, distance_threshold = self.distance_threshold)
         pp_model = ProximalPairs(geneList = self.geneList, df_loc = self.df_batch.loc[self.df_batch.uID == cell_id][['absX', 'absY']], distance_threshold = self.distance_threshold)
-        #print("Completed PP in ", timeit.default_timer() - start)
         return cell_num, pp_model.p_vals, pp_model.genecount.values.reshape(len(self.geneList))
 
     def _save_pval_matrix(self, filename):
@@ -243,14 +296,14 @@ class Instant():
         with open(filename, 'rb') as fp:
             self.geneList = pickle.load(fp)
 
-        # for i, cell_id in enumerate(cell_ids):
-        #     df_id = self.df[self.df.uID == cell_id]
-        #     if self.df[self.df.uID == cell_id].shape[0] > min_genecount:
-        #         x = self._calculate_ProximalPairs([i, self.df.uID, cell_id])
-        #     else:
-        #         print('min genecount less than', min_genecount)
-
     def run_ProximalPairs_parallel(self, distance_threshold, min_genecount, pval_matrix_name = None, gene_count_name = None):
+        '''
+        TODO Implement batched ProximalPairs calculation to decrease memory overhead.
+            
+            Arguments: 
+                - expression_data: (String) Path to expression data csv file.
+                - barcode_data: (String) Path to expression data csv file.
+        '''
         self.distance_threshold = distance_threshold
         cell_ids = self.df.uID.unique()
         num_cells = len(cell_ids)
@@ -279,20 +332,7 @@ class Instant():
             print(f"Done")  
             with open(pval_matrix_name[:-4]+f"_batch_{n}_results.pkl", 'wb') as fp:
                 pickle.dump(results, fp)
-            #for cell_i_result in results:
-            #    self.all_pval[cell_i_result[0]] = cell_i_result[1]
-            #    self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
             print(f"Time to complete PP for cell batch {n}: ", timeit.default_timer() - check)
-
-            #if pval_matrix_name:
-            #    self._save_pval_matrix(pval_matrix_name[:-4]+f"_batch_{n}.pkl")
-            #if gene_count_name:
-            #    self._save_gene_count(gene_count_name+f"_batch_{n}.pkl")
-        
-        # if pval_matrix_name:
-        #     self._save_pval_matrix(pval_matrix_name)
-        # if gene_count_name:
-        #     self._save_gene_count(gene_count_name)
         print(f"Cell-wise Proximal Pairs Time : {round(timeit.default_timer() - start, 2)} seconds")
     
     def run_ProximalPairs(self, distance_threshold, min_genecount, pval_matrix_name = None, gene_count_name = None):
@@ -342,7 +382,7 @@ class Instant():
         present_cells = self._num_present_cells(min_transcript)
         obs = self._binarize_adj_matrix(alpha_cellwise).sum(axis=0)
         unstacked_global_pvals = self._unstack_df_both(obs, present_cells, alpha_cellwise)
-        unstacked_global_pvals.to_excel(filename) 
+        unstacked_global_pvals.to_csv(filename) 
 
     def _binarize_adj_matrix(self, alpha):
         edge_all  = np.zeros(self.all_pval.shape)
@@ -374,7 +414,6 @@ class Instant():
     
     def run_GlobalColocalization(self, g = None, alpha_cellwise = 0.01, min_transcript = 0, show_det_pairs = 0, high_precision = False, glob_coloc_name = None, exp_coloc_name = None, unstacked_pvals_name = None):
         print(f"Running GCL now on {self.threads} threads")
-        #self.geneList = pd.read_csv(g, index_col=0).index.unique()
         start = timeit.default_timer()
         global_coloc_model = ConditionalGlobalColocalization(all_cell_pval = self.all_pval, transcript_count = self.all_gene_count, alpha_cellwise = alpha_cellwise, min_transcript = min_transcript, show_det_pairs = show_det_pairs, threads = self.threads, high_precision = high_precision)
         global_coloc, expected_coloc = global_coloc_model.global_colocalization()
@@ -384,6 +423,7 @@ class Instant():
             self._save_globcolocal_csv(glob_coloc_name)
         if exp_coloc_name:
             self._save_expcolocal_csv(exp_coloc_name)
+        #self.geneList = pd.read_csv(g, index_col=0).index.unique()
         #self.global_coloc_df = pd.read_csv(glob_coloc_name, index_col=0)
         #self.expected_coloc_df = pd.read_csv(exp_coloc_name, index_col=0)
         if unstacked_pvals_name:

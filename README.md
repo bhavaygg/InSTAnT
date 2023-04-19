@@ -32,7 +32,7 @@ If the data has been preprocessed, we can just load it like below
 ```
 obj.load_preprocessed_data(data = f'data/u2os_new/data_processed.csv')
 ```
-After the data has been loaded, we can now calculate the proximal gene pairs for each cell using the `run_ProximalPairs()` function. The following arguments are used by `run_ProximalPairs()`
+The datafrmae is loaded in the object variable `df` and can be accesses through `ovj.df`. After the data has been loaded, we can now calculate the proximal gene pairs for each cell using the `run_ProximalPairs()` function. The following arguments are used by `run_ProximalPairs()`
   - `distance_threshold`: *(Integer)* Distance threshold at which to consider 2 genes proximal.
   - `min_genecount`: *(Integer)* Minimum number of transcripts in each cell.
   - `pval_matrix_name`: *(String)* *(Optional)* if provided saves pvalue matrix using pickle at the input path.
@@ -58,6 +58,12 @@ obj.run_GlobalColocalization(
     exp_coloc_name = f"data/u2os/rep3/expected_colocalization.csv", 
     unstacked_pvals_name = f"data/u2os/rep3/unstacked_global_pvals.csv")
 ```
+Since, performing the ProximalPairs is a time consuming step but necessary for calculating Global Colocalization, we have added the support to load the outputs of ProximalPairs just so that you don't need to run them again. Apart from loading the data using `load_preprocessed_data()`, you need to use the functions below to load the pvalue matrix and the gene counts. 
+```
+obj.load_pval_matrix(f"data/u2os/rep3/rep3_pvals.pkl")
+obj.load_gene_count(f"data/u2os/rep3/rep3_gene_count.pkl")
+```
+
 The final outputs are 3 csv files - 
   - Global colocalization csv :  contains pairwise significance value of d-colocalization
     | gene          | 5830417i10rik | Aatf     | Abcc1    | Abhd2    |

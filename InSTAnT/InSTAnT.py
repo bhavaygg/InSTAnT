@@ -15,7 +15,7 @@ from numpy.random import default_rng
 
 class ConditionalGlobalColocalization():
     '''
-        Performs conditional gloval colocalization
+        Performs conditional global colocalization
         Requires output from ProximalPairs()
         Arguments: 
             - all_cell_pval: (Array) Gene-Gene pairwise pvalues for all cells calcuated using ProximalPairs().
@@ -38,6 +38,9 @@ class ConditionalGlobalColocalization():
         self.prob_cells_coloc()
 
     def binarize_adj_matrix(self):
+        '''
+        Convert all pvals > alpha to 1
+        '''
         edge_all  = np.zeros(self.all_cell_pval.shape)
         edge_all[self.all_cell_pval < self.alpha] = 1
         self.edge = edge_all
@@ -47,8 +50,8 @@ class ConditionalGlobalColocalization():
         print('Number of cells: %d, Number of genes: %d' %(self.num_cells, self.num_genes))
 
     def global_weight_pair(self):
-        global_genecount = self.edge.sum(axis = (0,1)).reshape([-1,1]) #for each gene then?
-        weight_pair = np.matmul(global_genecount, np.transpose(global_genecount)) #igher the better?
+        global_genecount = self.edge.sum(axis = (0,1)).reshape([-1,1])
+        weight_pair = np.matmul(global_genecount, np.transpose(global_genecount))
         self.gene_pair_weight = weight_pair
 
     def prob_cells_coloc(self):
@@ -120,7 +123,6 @@ class ProximalPairs():
             self.obs_all = self.obs_spatial_cat()
     
     def compute_p_val(self):
-        #start = timeit.default_timer()
         p_vals = np.ones((len(self.geneList), len(self.geneList)), dtype = np.float16)
         for i in range(self.obs.shape[0]):
             for j in range(i,self.obs.shape[1]):
@@ -130,6 +132,9 @@ class ProximalPairs():
         return p_vals
 
     def prob_null_hypothesis(self):
+        '''
+        Using a KDTree, find all pairs of genes in a cell that are under distance `distance_threshold`
+        '''
         self.point_tree = cKDTree(self.curr_cell_df)
         self.pairs = self.point_tree.query_pairs(self.distance_threshold)
         if len(self.pairs):   #Later change the condition to min gene count and other heuristic
@@ -139,11 +144,18 @@ class ProximalPairs():
         return prob_null
 
     def num_trial_pairs(self):  #Reindexed with geneList
+        '''
+        Count for each gene pair, the number of times they are proximal given the `distance_threshold`
+        '''
         genecount = pd.DataFrame.from_dict(Counter(self.curr_cell_df.index) , orient='index').reindex(self.geneList).fillna(0)
         num_trial_pairs = np.dot(genecount, genecount.T)   #n1*n2  #using numpy here now
         return genecount, num_trial_pairs
 
     def obs_trial_pairs(self): #debug for large d
+        '''
+        After counting all gene pairs within the distance threshold, create a pivot table to create a 2d represtation
+        and fill in the missing genes.
+        '''
         pairs = [(self.curr_cell_df.index[i], self.curr_cell_df.index[j]) for (i,j) in self.pairs]
         pairs = Counter(pairs)
         pairs = pd.Series(pairs).reset_index()
@@ -386,7 +398,7 @@ class Instant():
         of whether gene i and gene j are proximal gene pairs in that cell.
             Arguments: 
                 - distance_threshold: (Integer) distance threshold at which to consider 2 genes proximal.
-                - barcode_data: (String) Path to expression data csv file.
+                - min_genecount: (integer) Minimum number of transcripts in each cell.
                 - pval_matrix_name: (String) (Optional) if provided saves pvalue matrix using pickle at the input path.
                 - gene_count_name: (String) (Optional) if provided saves gene expression count matrix using pickle at the input path.
         '''
@@ -472,10 +484,10 @@ class Instant():
         Requires `run_ProximalPairs()` be run first to generate the p-value matrix for all cells. 
         Generates 3 dataframes both of size (num_genes, num_genes)
         Arguments: 
-            - alpha_cellwise: (Float) pvalue signifcance threshold (>alpha_cellwise are converted to 1).
-            - min_transcript: (Float) Gene expression lower threshold.
+            - alpha_cellwise: (Float) pvalue signifcance threshold (>alpha_cellwise are converted to 1). Default = 0.05.
+            - min_transcript: (Float) Gene expression lower threshold. Default = 0.
             - show_det_pairs: (Not used)
-            - high_precision: (Boolean) High precision pvalue. Expect longer computer.
+            - high_precision: (Boolean) High precision pvalue. Expect longer computer. Default = False.
             - glob_coloc_name: (String) (Optional) if provided saves global colocalization matrix as a csv at the input path.
             - exp_coloc_name: (String) (Optional) if provided saves expected colocalization matrix as a csv at the input path.
             - unstacked_pvals_name: (String) (Optional) if provided saves interpretable global colocalization matrix as a csv at the input path.
@@ -496,217 +508,3 @@ class Instant():
         if unstacked_pvals_name:
             self._save_unstacked_pvals(unstacked_pvals_name, alpha_cellwise, min_transcript)
         print(f"Cell-wise Global Colocalization Time : {round(timeit.default_timer() - start, 2)} seconds")
-    
-    def _calculate_bento_cell_coloc(self, args):
-        start = timeit.default_timer()
-        cell_num, cell_id, nofilter = args[0], args[1], args[2]
-        cell_df = self.df_batch.loc[self.df_batch.uID == cell_id]
-        
-        if nofilter == 1:
-            #print(1)
-            counts = cell_df.index.value_counts()
-            valid_points = cell_df.copy()
-            valid_genes = cell_df.index.values
-        else:
-            #print(1)
-            # Count number of points for each gene
-            # Only keep genes >= min_count
-            counts = cell_df.index.value_counts()
-            counts = counts[counts >= self.min_count]
-            valid_genes = counts.sort_index().index.tolist()
-            counts = counts[valid_genes]
-            valid_points = cell_df.loc[valid_genes]
-        # Get points
-        n_points = valid_points.shape[0]
-        if valid_points[["absX", "absY"]].shape[0] == 0: 
-            return None
-        if self.n_neighbors:
-            nn = NearestNeighbors(n_neighbors=self.n_neighbors).fit(valid_points[["absX", "absY"]])
-            point_index = nn.kneighbors(valid_points[["absX", "absY"]], return_distance=False)
-        elif self.radius:
-            nn = NearestNeighbors(radius=self.radius).fit(valid_points[["absX", "absY"]])
-            point_index = nn.radius_neighbors(
-                valid_points[["absX", "absY"]], return_distance=False
-        )
-        # Flatten adjacency list to pairs
-        source_index = []
-        neighbor_index = []
-        for source, neighbors in zip(range(valid_points.shape[0]), point_index):
-            source_index.extend([source] * len(neighbors))
-            neighbor_index.extend(neighbors) 
-        source_index = np.array(source_index)
-        neighbor_index = np.array(neighbor_index)
-        # Remove self neighbors
-        is_self = source_index == neighbor_index
-        source_index = source_index[~is_self]
-        neighbor_index = neighbor_index[~is_self]
-        # Remove duplicate neighbors
-        _, is_uniq = np.unique(neighbor_index, return_index=True)
-        source_index = source_index[is_uniq]
-        neighbor_index = neighbor_index[is_uniq]
-        #Index to gene mapping; dict for fast lookup
-        temp = valid_points.copy()
-        index2gene = temp.reset_index()['gene'].to_dict()
-        # Map to genes
-        source_genes = np.array([index2gene[i] for i in source_index])
-        neighbor_genes = np.array([index2gene[i] for i in neighbor_index])
-        # Preshuffle neighbors for permutations
-        perm_neighbors = []
-        if self.permutations > 0:
-            # Permute neighbors
-            rng = default_rng()
-            for i in range(self.permutations):
-                perm_neighbors.append(rng.permutation(neighbor_genes))
-        neighbor_space = {g: 0 for g in valid_genes}
-        # Iterate across genes
-        stats_list = []
-        for cur_gene, cur_total in zip(valid_genes, counts[valid_genes]):
-
-            # Select pairs where source = gene of interest
-            cur_neighbor_genes = neighbor_genes[source_genes == cur_gene]
-            # Count neighbors
-            obs_genes, obs_count = np.unique(cur_neighbor_genes, return_counts=True)
-
-            # Save counts and order with dict
-            obs_space = neighbor_space.copy()
-            obs_space.update(zip(obs_genes, obs_count))
-            obs_count = np.array(list(obs_space.values()))
-
-            # Calculate colocation quotient for all neighboring genes
-            # print(obs_count, counts)
-            obs_quotient = (obs_count / cur_total) / ((counts - 1) / (n_points - 1))
-            obs_quotient = np.expand_dims(obs_quotient, 0)
-            obs_fraction = obs_count / counts
-
-            # Perform permutations for significance
-            if self.permutations > 0:
-                perm_counts = []
-                for i in range(self.permutations):
-                    # Count neighbors
-                    perm_genes, perm_count = np.unique(
-                        perm_neighbors[i], return_counts=True
-                    )
-                    # Save counts
-                    perm_space = neighbor_space.copy()
-                    perm_space.update(dict(zip(perm_genes, perm_count)))
-                    perm_counts.append(np.array(list(perm_space.values())))
-                # (permutations, len(valid_genes)) array
-                perm_counts = np.array(perm_counts)
-                # Calculate colocation quotient
-                perm_quotients = (perm_counts / cur_total) / (
-                    (counts.values - 1) / (n_points - 1)
-                )
-                # Fraction of times statistic is greater than permutations
-                pvalue = (
-                    2
-                    * np.array(
-                        [
-                            np.greater_equal(obs_quotient, perm_quotients).sum(axis=0),
-                            np.less_equal(obs_quotient, perm_quotients).sum(axis=0),
-                        ]
-                    ).min(axis=0)
-                    / self.permutations
-                )
-                stats_list.append(
-                    np.array(
-                        [
-                            obs_fraction.index,
-                            obs_count,
-                            obs_fraction.values,
-                            obs_quotient[0],
-                            pvalue,
-                            [cur_gene] * len(obs_count),
-                        ]
-                    )
-                )
-            else:
-                stats_list.append(
-                    np.array(
-                        [
-                            obs_fraction.index,
-                            obs_count,
-                            obs_fraction.values,
-                            obs_quotient[0],
-                            [1] * len(obs_count),
-                            [cur_gene] * len(obs_count),
-                        ]
-                    )
-                )
-        return cell_num, np.concatenate(stats_list, axis=1).T
-
-    def run_bento_clq(self, n_neighbors=25, radius=None, min_genecount = 20, min_count=5, permutations=10, nofilter = 0):
-        '''
-        Function to run bento colocalization. Bento's code is converted a bit to match our data handling.
-        Requires data to be loaded using appropriate loading function.
-        Arguments: 
-            - n_neighbors: (Integer) Number of nearest gene neighbours to consider.
-            - radius: (Integer) Radius to search for neighbors around a gene. If specified, set `n_neighbors` to None.
-            - min_genecount: (Integer) Minimum number of transcripts in each cell.
-            - min_count: (Integer) Minimum threshold of transcripts a gene must have in each cell.
-        '''
-        self.min_count = min_count
-        self.n_neighbors = n_neighbors
-        self.permutations = permutations
-        self.radius = radius
-        cell_ids = self.df.uID.unique()
-        num_cells = len(cell_ids)
-        print(f"Running Bento coloc now on {self.threads} threads, {mp.cpu_count()}")
-        print("Number of cells: ", len(cell_ids), ", Number of Genes: ", len(self.geneList))
-        start = timeit.default_timer()
-        valid_cell_data = []
-        self.df_batch = self.df.loc[self.df.uID.isin(cell_ids)]
-        del self.df
-        num_transcripts = 0
-        for i, cell_id in enumerate(cell_ids):
-            num_transcripts += self.df_batch.loc[self.df_batch.uID == cell_id].shape[0]
-            #print(self.df_batch.loc[self.df_batch.uID == cell_id].shape)
-            if self.df_batch[self.df_batch.uID == cell_id].shape[0] > min_genecount:
-                valid_cell_data.append([i, cell_id, nofilter])
-            else:
-                print(f"min genecount less than {min_genecount} for cell id {cell_id}, Skipping ...")
-        check = timeit.default_timer()
-        pool = mp.Pool(processes = self.threads)
-        print(f"Running Bento coloc now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
-        results = pool.map(self._calculate_bento_cell_coloc, valid_cell_data)
-        print(f"Done")
-        self.all_quot = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
-        self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = np.float16) 
-        #print(set(self.geneList).difference(set(self.df_batch[self.df_batch.uID == cell_ids[0]].index.values)))
-        for i in results:
-            if i == None:
-                continue
-            cell_n, result = i[0], i[1]
-            pairs = {}
-            for gene_pair in result:
-                pairs[(gene_pair[5], gene_pair[0])] = gene_pair[3] #quotient
-            pairs = pd.Series(pairs).reset_index()
-            obs_df = pd.pivot_table(pairs, index = 'level_0', columns ='level_1', values = 0, fill_value=0).fillna(0)
-            col_na_genes = list(set(self.geneList).difference(obs_df.columns))
-            row_na_genes = list(set(self.geneList).difference(obs_df.index))
-            obs_df.loc[ : , col_na_genes] = 0
-            #obs_df.loc[row_na_genes] = 0
-            for row_na in row_na_genes:
-                obs_df.loc[row_na] = 0
-            self.all_quot[cell_n] = obs_df.reindex(index = self.geneList, columns = self.geneList)
-            #gene_data = {}
-            #for gene_pair in result:
-            #    pairs[(gene_pair[5], gene_pair[0])] = gene_pair[4] #pval
-            #    if gene_pair[5] not in gene_data:
-            #        gene_data[(gene_pair[5], gene_pair[0])] = gene_pair[1]
-            #    else:
-            #        gene_data[(gene_pair[5], gene_pair[0])] += gene_pair[1]
-            #pairs = pd.Series(pairs).reset_index()
-            #print(len(pairs))
-            #print(pairs.loc[pairs['level_0'] == "AFAP1"])
-            #print(gene_data, np.min(gene_data.values))
-            
-            #obs_df = pd.pivot_table(pairs, index = 'level_0', columns ='level_1', values = 0, fill_value=0).fillna(1)
-            #col_na_genes = list(set(self.geneList).difference(obs_df.columns))
-            #row_na_genes = list(set(self.geneList).difference(obs_df.index))
-            #obs_df.loc[ : , col_na_genes] = 1
-            ##obs_df.loc[row_na_genes] = 0
-            #for row_na in row_na_genes:
-            #    obs_df.loc[row_na] = 1
-            #self.all_quot[cell_n] = obs_df.reindex(index = self.geneList, columns = self.geneList)
-        with open(f'bento_clq_{radius}_{random}_{nofilter}.pkl', 'wb') as fp:
-            pickle.dump(self.all_quot, fp)

@@ -182,11 +182,12 @@ class ProximalPairs3D():
             - distance_threshold: (Integer) distance threshold at which to consider 2 genes proximal.
             - mode: (Not used).
     '''
-    def __init__(self, geneList, df, distance_threshold, min_gene_counts = 10):
+    def __init__(self, geneList, df, distance_threshold, min_genecount = 10, cell_id = None):
         self.df = df
         self.distance_threshold = distance_threshold
         self.geneList = geneList
-        self.min_gene_counts = min_gene_counts
+        self.min_gene_counts = min_genecount
+        self.cell_id = cell_id
         self.z_list = np.sort(df.absZ.unique())
         self.obs, self.num_trial, self.genecount_all, self.prob_null = self.binom_params_all_axis()
         # print('prob null is ', self.prob_null)
@@ -201,7 +202,7 @@ class ProximalPairs3D():
         for z_axis in self.z_list:
             df = self.df[['uID', 'gene', 'absX', 'absY', 'absZ']]
             df = df[df.absZ == z_axis][['uID', 'gene', 'absX', 'absY']]
-            if df.shape[0] > self.min_gene_counts:
+            if df.shape[0] > self.min_genecount:
                 model_single_axis = ProximalPairs(self.geneList, df, self.dist_thresh)
                 obs_all.append(model_single_axis.obs_df.values)
                 num_trial_all.append(model_single_axis.num_trial_df.values)
@@ -209,6 +210,8 @@ class ProximalPairs3D():
                 prob_null, len_prob_null = model_single_axis.prob_null_hypothesis()
                 prob_null_all.append(prob_null)
                 len_prob_null_all.append(len_prob_null)
+            else:
+                print(f"min genecount less than {self.min_genecount} for cell id {self.cell_id} for z {z_axis}, Skipping ...")
 
         if len(prob_null_all):
             obs_all = np.array(obs_all).sum(axis = 0)
@@ -461,7 +464,7 @@ class Instant():
         self.distance_threshold = distance_threshold
         cell_ids = self.df.uID.unique()
         num_cells = len(cell_ids)
-        print(f"Running PP now on {self.threads} threads, {mp.cpu_count()}")
+        print(f"Initialised PP now on {self.threads} threads")
         print("Number of cells: ", len(cell_ids), ", Number of Genes: ", len(self.geneList))
         start = timeit.default_timer()
         valid_cell_data = []
@@ -474,7 +477,7 @@ class Instant():
             if self.df_batch[self.df_batch.uID == cell_id].shape[0] > min_genecount:
                 valid_cell_data.append([i, cell_id])
             else:
-                print(f"min genecount less than {min_genecount} for cell id {cell_id}, Skipping ...")
+                print(f"min genecount less than {min_genecount} for cell id {cell_id} across all Z, Skipping ...")
         check = timeit.default_timer()
         pool = mp.Pool(processes = self.threads)
         print(f"Running PP now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
@@ -496,10 +499,11 @@ class Instant():
 
     def _calculate_ProximalPairs3D(self, args):
         cell_num, cell_id = args[0], args[1]
-        pp_model = ProximalPairs3D(geneList = self.geneList, df_loc = self.df.loc[self.df.uID == cell_id], distance_threshold = self.distance_threshold)
+        pp_model = ProximalPairs3D(geneList = self.geneList, df_loc = self.df.loc[self.df.uID == cell_id], distance_threshold = self.distance_threshold, 
+                                   min_genecount = self.min_genecount, cell_id = cell_id)
         return cell_num, pp_model.p_vals, pp_model.genecount.values.reshape(len(self.geneList))
     
-    def run_ProximalPairs(self, distance_threshold, min_genecount, pval_matrix_name = None, gene_count_name = None):
+    def run_ProximalPairs3D(self, distance_threshold, min_genecount, pval_matrix_name = None, gene_count_name = None):
         '''
         Calculates Proximal pairs for each gene pair for each input cell. Runs the ProximalPairs() class for each cell
         and generates a 2d (num_genes, num_genes) matrix whose index (i,j) represents the p-value significance
@@ -511,9 +515,10 @@ class Instant():
                 - gene_count_name: (String) (Optional) if provided saves gene expression count matrix using pickle at the input path.
         '''
         self.distance_threshold = distance_threshold
+        self.min_genecount = min_genecount
         cell_ids = self.df.uID.unique()
         num_cells = len(cell_ids)
-        print(f"Running PP now on {self.threads} threads, {mp.cpu_count()}")
+        print(f"Initialised PP-3D now on {self.threads} threads")
         print("Number of cells: ", len(cell_ids), ", Number of Genes: ", len(self.geneList))
         start = timeit.default_timer()
         valid_cell_data = []
@@ -528,8 +533,8 @@ class Instant():
                 print(f"min genecount less than {min_genecount} for cell id {cell_id}, Skipping ...")
         check = timeit.default_timer()
         pool = mp.Pool(processes = self.threads)
-        print(f"Running PP now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
-        results = pool.map(self._calculate_ProximalPairs, valid_cell_data)
+        print(f"Running PP 3D now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
+        results = pool.map(self._calculate_ProximalPairs3D, valid_cell_data)
         print(f"Done")  
         self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
         self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = np.float16) 

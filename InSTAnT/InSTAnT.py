@@ -11,7 +11,12 @@ from sklearn.neighbors import NearestNeighbors
 from InSTAnT.poibin import PoiBin
 from InSTAnT.poisson_binomial import PoissonBinomial
 from numpy.random import default_rng
-
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+from scipy.stats import multivariate_hypergeom
+from scipy.stats import hypergeom
+from pathlib import Path
+import subprocess
 
 class ConditionalGlobalColocalization():
     '''
@@ -110,7 +115,7 @@ class ProximalPairs():
     '''
     def __init__(self, geneList, df_loc, distance_threshold, mode="normal"):
         self.geneList = geneList
-        #self.orig_df = df_loc.copy()
+        #self.df = df_loc.copy()
         self.curr_cell_df = df_loc[['absX', 'absY']]
         self.distance_threshold = distance_threshold
         if mode=='normal':
@@ -186,10 +191,10 @@ class ProximalPairs3D():
         self.df = df
         self.distance_threshold = distance_threshold
         self.geneList = geneList
-        self.min_gene_counts = min_genecount
+        self.min_genecount = min_genecount
         self.cell_id = cell_id
         self.z_list = np.sort(df.absZ.unique())
-        self.obs, self.num_trial, self.genecount_all, self.prob_null = self.binom_params_all_axis()
+        self.obs, self.num_trial, self.genecount, self.prob_null = self.binom_params_all_axis()
         # print('prob null is ', self.prob_null)
         self.p_vals = self.compute_p_val()
 
@@ -200,16 +205,16 @@ class ProximalPairs3D():
         len_prob_null_all = []
         genecount_all = []
         for z_axis in self.z_list:
-            df = self.df[['uID', 'gene', 'absX', 'absY', 'absZ']]
-            df = df[df.absZ == z_axis][['uID', 'gene', 'absX', 'absY']]
+            df = self.df[['uID', 'absX', 'absY', 'absZ']]
+            df = df[df.absZ == z_axis][['uID', 'absX', 'absY']]
             if df.shape[0] > self.min_genecount:
-                model_single_axis = ProximalPairs(self.geneList, df, self.dist_thresh)
-                obs_all.append(model_single_axis.obs_df.values)
-                num_trial_all.append(model_single_axis.num_trial_df.values)
+                model_single_axis = ProximalPairs(self.geneList, df, self.distance_threshold)
+                obs_all.append(model_single_axis.obs)
+                num_trial_all.append(model_single_axis.num_trial)
                 genecount_all.append(model_single_axis.genecount.iloc[:,0].values)  #df series doesn't return values with iloc directly
-                prob_null, len_prob_null = model_single_axis.prob_null_hypothesis()
+                prob_null = model_single_axis.prob_null
                 prob_null_all.append(prob_null)
-                len_prob_null_all.append(len_prob_null)
+                len_prob_null_all.append(len(model_single_axis.pairs))
             else:
                 print(f"min genecount less than {self.min_genecount} for cell id {self.cell_id} for z {z_axis}, Skipping ...")
 
@@ -234,6 +239,208 @@ class ProximalPairs3D():
                 p_vals[j,i] = p_vals[i,j]
         return p_vals
 
+
+class SpatialModulation:
+    def __init__(self, edge_all_cells, pos_cells, dist, geneList, file_name, min_num_neighbor = 1, threads = 1):
+        self.edge_all_cells = edge_all_cells
+        self.num_genes = edge_all_cells.shape[1]
+        self.pos_cells = pos_cells
+        self.dist, self.min_num_neighbor = dist, min_num_neighbor
+        self.threads = threads
+        self.geneList = geneList
+        self.filename = file_name
+        self.estimate_prob()
+        self.optimize_all_pair_h1()
+        self.unstack_df_llr()
+
+    def estimate_prob(self, show_neighbor_hist = 0):
+        print('Estimating Global and Local Probabilities')
+        num_cells = self.pos_cells.shape[0]
+        prob_global = self.edge_all_cells.sum(axis = 0)/num_cells
+        prob_neighbors = np.zeros((num_cells, self.num_genes, self.num_genes))
+        point_tree = cKDTree(self.pos_cells)
+
+        num_neighbors = []
+        for cell_index in range(num_cells):
+            curr_cell_loc = self.pos_cells.iloc[cell_index,:]
+            neighbors_index = point_tree.query_ball_point(curr_cell_loc, self.dist)
+            neighbors_index.remove(cell_index)
+            num_neighbors.append(len(neighbors_index))
+            if len(neighbors_index) < self.min_num_neighbor :
+                curr_prob_neighbors = prob_global
+            else:
+                curr_prob_neighbors = (self.edge_all_cells[neighbors_index , :, :].sum(axis=0))/(len(neighbors_index)) 
+            prob_neighbors[cell_index] = curr_prob_neighbors
+
+        if show_neighbor_hist:
+            plt.hist(num_neighbors)
+        self.prob_global, self.prob_neighbors = prob_global, prob_neighbors
+
+    def find_log_likelihood_pair(self, i,j, obs_edge, with_neighbor = 0):
+        if with_neighbor : 
+            neigh_prob = self.prob_neighbors[:,i,j]
+            neigh_prob_0 = neigh_prob[obs_edge == 0]
+            neigh_prob_1 = neigh_prob[obs_edge == 1]
+            ll = np.log(1 - neigh_prob_0).sum() + np.log(neigh_prob_1).sum()
+        else:
+            p1 = self.prob_global[i,j]
+            if p1 ==0:
+                p1 = 1e-64
+            ll = obs_edge.sum() * np.log(p1) + (obs_edge.shape[0] - obs_edge.sum()) * np.log(1 - p1)
+        return ll
+
+    def objective_function(self, x, obs_edge, neigh_prob):
+        w = x[0]
+        p1 = x[1]
+        t = p1*(1-w) + (w)* neigh_prob  #x is weight
+        t_0 = t[obs_edge == 0]
+        t_1 = t[obs_edge == 1]
+        log_ll = (np.log(1 - t_0)).sum() + np.log(t_1).sum()
+        return -log_ll
+    
+    def _parallelize_optimization(self, args):
+        i, j, obs_edge, neigh_prob = args[0], args[1], args[2], args[3]
+        return i, j, self.find_log_likelihood_pair(i,j, obs_edge, with_neighbor = 0), minimize(self.objective_function, x0 = [0.1, self.prob_global[i,j]], args=(obs_edge, neigh_prob), bounds= ((0.00001,0.99999),(0.00001,0.99999)))
+    
+    def optimize_all_pair_h1(self):
+        print(f"Running Spatial Modulation now on {self.threads} threads for, {self.pos_cells.shape[0]} cells, {self.num_genes} genes ..")
+        pool = mp.Pool(processes = self.threads)
+        parallel_arguments = []
+        for i in range(self.num_genes):
+            for j in range(i, self.num_genes):
+                parallel_arguments.append([i, j, self.edge_all_cells[:,i,j], self.prob_neighbors[:,i,j]])
+        del self.edge_all_cells, self.prob_neighbors
+        results = pool.map(self._parallelize_optimization, parallel_arguments)
+        ll_h0_all = np.zeros((self.num_genes, self.num_genes))
+        ll_h1_all = np.zeros(( self.num_genes, self.num_genes))
+        w_h1_all = np.zeros((self.num_genes, self.num_genes))
+        p_h1_all = np.zeros((self.num_genes, self.num_genes))
+        for result in results:
+            i, j, ll_ij, res = result[0], result[1], result[2], result[3]
+            [w, p_h1] = res.x
+            w_h1_all[i,j] = w
+            p_h1_all[i,j] = p_h1
+            ll_h1_all[i,j]  = -res.fun
+            ll_h1_all[j,i] = ll_h1_all[i,j]
+            ll_h0_all[i,j] = ll_ij
+        self.w_h1_all = w_h1_all
+        self.p_h1_all = p_h1_all
+        self.ll_h0_all, self.ll_h1_all = ll_h0_all, ll_h1_all
+    
+    def unstack_df_llr(self):
+        print("Saving ..")
+        llr = self.ll_h1_all - self.ll_h0_all
+        llr = llr[np.triu_indices(self.num_genes)]
+        self.w_h1_all = self.w_h1_all[np.triu_indices(self.num_genes)]
+        self.p_h1_all = self.p_h1_all[np.triu_indices(self.num_genes)]
+        self.prob_global = self.prob_global[np.triu_indices(self.num_genes)]
+        gene_id1 = [self.geneList[i] for i in np.triu_indices(self.num_genes)[0]]
+        gene_id2 = [self.geneList[i] for i in np.triu_indices(self.num_genes)[1]]
+        data = {'gene_id1': gene_id1, 'gene_id2': gene_id2, 'llr': llr, 'w_h1': self.w_h1_all, 'p_g_h1': self.p_h1_all, 'p_g_h0' : self.prob_global}
+        pairwise_p_val_df = pd.DataFrame(data)
+        pairwise_p_val_df['g1g2'] = pairwise_p_val_df['gene_id1'] + ', ' + pairwise_p_val_df['gene_id2']
+        pairwise_p_val_df = pairwise_p_val_df.set_index(['g1g2'])
+        pairwise_p_val_df = pairwise_p_val_df.sort_values(by=['llr'],ascending=False)
+        pairwise_p_val_df.to_csv(self.filename)
+
+class CellTypeCharacterization():
+    def __init__(self, all_p_vals, genecount, geneList, ct_spec_indices, rest_indices, cell_type, file_location, alpha = 0.01, threads = 1):
+        self.threads = threads
+        self.ct_spec_indices,self.rest_indices = ct_spec_indices, rest_indices
+        self.all_p_vals = all_p_vals[ct_spec_indices+rest_indices]
+        self.genecount = genecount[ct_spec_indices+rest_indices]
+        self.geneList,self.alpha = geneList,alpha
+        self.binarize_adj_matrix()
+        self.all_pairs_cond_df, self.all_pairs_uncond_df, self.all_pairs_g1_df = self.compute_all_pairs()
+        self.all_pairs_cond_df.to_csv(Path(file_location) / f"{cell_type}_conditional.csv")
+        self.all_pairs_uncond_df.to_csv(Path(file_location) / f"{cell_type}_unconditional.csv")
+        self.all_pairs_g1_df.to_csv(Path(file_location) / f"{cell_type}_genemarkers.csv")
+
+    def binarize_adj_matrix(self):
+        edge_all  = np.zeros(self.all_p_vals.shape)
+        edge_all[self.all_p_vals < self.alpha] = 1
+        self.edge = edge_all
+        self.obs = edge_all.sum(axis=0)
+        self.num_cells = edge_all.shape[0]
+        self.num_genes = edge_all.shape[1]
+        
+    def all_set_intersection(self, i, j):
+        M = range(len(self.ct_spec_indices)) #Cell type index
+        O = self.colocalized_set(i,j)
+        E = self.high_exp_set(i,len(M))
+        gamma = len([k for k in M if k in E])
+        lambd = len([k for k in M if k in O])
+        alpha = len([k for k in O if k in E])
+        return gamma,lambd, alpha, len(M), len(E), len(O)
+    
+    def compute_cond_p_val(self,i,j):
+        gamma,lambd, alpha,m, n1, n2 = self.all_set_intersection(i,j)
+        N = self.num_cells 
+        p_val_num = 0
+        for k in range(lambd, min(m,n2)+1):
+            for beta in range(k+1):
+                x = [beta, k-beta, alpha-beta, n2-alpha-k+beta]
+                r = [gamma, m-gamma, n1-gamma, N-m-n1+gamma]
+                curr_pmf = multivariate_hypergeom.pmf(x=x, m=r, n=n2)
+#                 print('curr_pmf', curr_pmf)
+                p_val_num = p_val_num + curr_pmf
+        p_val_denom = hypergeom(N, n1, n2).pmf(alpha)
+        return p_val_num/p_val_denom
+        
+    def colocalized_set(self,i,j):
+        all_obs_ij = self.edge[:,i,j]
+        O = [k for k,item in enumerate(all_obs_ij) if item == 1]
+        return O
+    
+    def high_exp_set(self,i,n1):
+        genecount_i = self.genecount[:,i]
+        E = np.argpartition(genecount_i, -n1)[-n1:] #top n1
+        return E
+    
+    def compute_uncond_p_val(self, i, j, isPair = True):
+        gamma, lambd, alpha, m, n1, n2 = self.all_set_intersection(i,j)
+        if isPair:
+            p_val = hypergeom.sf(lambd-1, self.num_cells, n2, m)
+        else:
+            p_val = hypergeom.sf(gamma-1, self.num_cells, n1, m)
+        return p_val
+    
+    def _compute_genemarker(self, args):
+        i = args
+        return i, self.compute_uncond_p_val(i, 0, isPair = False)
+    
+    def _compute_conditional(self, args):
+        i, j = args[0], args[1]
+        return i, j, self.compute_cond_p_val(i, j)
+    
+    def _compute_unconditional(self, args):
+        i, j = args[0], args[1]
+        return i, j, self.compute_uncond_p_val(i, j, isPair = True)
+    
+    def compute_all_pairs(self):
+        print('Computing Cell Type Characterization for Hypergeometric')
+        pool = mp.Pool(processes = self.threads)
+        gene_marker_data = list(range(self.num_genes))
+        gene_marker_data_results = pool.map(self._compute_genemarker, gene_marker_data)
+        conditional_data = [(i, j) for i in range(self.num_genes) for j in range(self.num_genes)]
+        conditional_data_results = pool.map(self._compute_conditional, conditional_data)
+        unconditional_data = [(i, j) for i in range(self.num_genes) for j in range(i, self.num_genes)]
+        unconditional_data_results = pool.map(self._compute_unconditional, unconditional_data)
+        all_pairs_cond = np.ones((self.num_genes, self.num_genes))
+        all_pairs_uncond = np.ones((self.num_genes, self.num_genes))
+        all_pairs_g1 = np.ones((self.num_genes,))
+        for result in gene_marker_data_results:
+            all_pairs_g1[result[0]] = result[1]
+        for result in unconditional_data_results:
+            all_pairs_uncond[result[0]][result[1]] = result[2]
+            all_pairs_uncond[result[1]][result[0]] = result[2]
+        for result in conditional_data_results:
+            all_pairs_cond[result[0]][result[1]] = result[2]
+        all_pairs_cond_df = pd.DataFrame(all_pairs_cond, index = self.geneList, columns = self.geneList)
+        all_pairs_uncond_df = pd.DataFrame(all_pairs_uncond, index = self.geneList, columns = self.geneList)
+        all_pairs_g1_df = pd.DataFrame(all_pairs_g1, index = self.geneList)
+        return all_pairs_cond_df, all_pairs_uncond_df, all_pairs_g1_df
+    
 class Instant():
     '''
     Intracellular Spatial Transcriptomic Analysis Toolkit (InSTAnT).
@@ -258,6 +465,8 @@ class Instant():
         self.filename = data
         self.df = pd.read_csv(data, index_col=0)
         self.geneList = self.df.index.unique()
+        print("Loaded Data. Number of Transcripts: ", len(self.df), ", Number of Genes: ", len(self.geneList), 
+              ", Number of Cells: ", len(self.df.uID.unique()))
     
     def load_preprocessed_data_randomize(self, data):
         '''
@@ -496,12 +705,101 @@ class Instant():
         if gene_count_name:
             self._save_gene_count(gene_count_name)
         print(f"Cell-wise Proximal Pairs Time : {round(timeit.default_timer() - start, 2)} seconds")
+    
+    def _spatial_category(self, distance_thresold_nucleus = 2.5, distance_threshold_cyto_nuclear = 2.5, distance_threshold_cyto_peri = 4):
+        nuc_distance = self.df.distNucleus.values
+        cyt_distance = self.df.distPeriphery.values
+        inNucleus = self.df.inNucleus.values
+        inner_nuclear = np.zeros(nuc_distance.shape)
+        peri_nuclear = np.zeros(nuc_distance.shape)
+        cytosolic = np.zeros(nuc_distance.shape)
+        peri_membrane = np.zeros(nuc_distance.shape)
+
+        inner_nuclear[(inNucleus == 1) & (nuc_distance > distance_thresold_nucleus )] = 1
+        peri_nuclear[(inNucleus == 1) & (nuc_distance <= distance_thresold_nucleus )] = 1
+        peri_nuclear[(inNucleus == 0) & (nuc_distance <= distance_threshold_cyto_nuclear )] = 1
+        cytosolic[(inNucleus == 0) & (nuc_distance > distance_threshold_cyto_nuclear) & (cyt_distance > distance_threshold_cyto_peri)] = 1
+        peri_membrane[(inNucleus == 0) & (cyt_distance <= distance_threshold_cyto_peri)] = 1
+        return [inner_nuclear, peri_nuclear, cytosolic, peri_membrane]
+    
+    def _category_counter(self, all_pairs, category_pairs):
+        counter = {}
+        spatial_cat_0,spatial_cat_1,spatial_cat_2,spatial_cat_3 = {},{},{},{}
+        pairs_isinnernuc, pairs_isperinuc, pairs_iscyto, pairs_iscellperi = category_pairs[0], category_pairs[1], category_pairs[2], category_pairs[3]
+        for i,elem in enumerate(all_pairs):
+            counter[elem] = counter.get(elem, 0) + 1
+            spatial_cat_0[elem] = spatial_cat_0.get(elem, 0) + pairs_isinnernuc[i]
+            spatial_cat_1[elem] = spatial_cat_1.get(elem, 0) + pairs_isperinuc[i]
+            spatial_cat_2[elem] = spatial_cat_2.get(elem, 0) + pairs_iscyto[i]
+            spatial_cat_3[elem] = spatial_cat_3.get(elem, 0) + pairs_iscellperi[i]
+        return counter, spatial_cat_0, spatial_cat_1, spatial_cat_2, spatial_cat_3
+    
+    def annotate_ProximalPairs(self, distance_threshold, distance_thresold_nucleus = 2.5, distance_threshold_cyto_nuclear = 2.5, distance_threshold_cyto_peri = 4):
+        self.distance_threshold = distance_threshold
+        spatial_cat_all = self._spatial_category(distance_thresold_nucleus, distance_threshold_cyto_nuclear, distance_threshold_cyto_peri)
+        # spatial_cat_all = spatialCatPercentile(self.df)
+        self.df.loc[:,'InnerNuc'] = spatial_cat_all[0]
+        self.df.loc[:,'PeriNuc'] = spatial_cat_all[1]
+        self.df.loc[:,'Cytosolic'] = spatial_cat_all[2]
+        self.df.loc[:,'PeriMem'] = spatial_cat_all[3]
+        point_tree = cKDTree(self.df)
+        queried_pairs = point_tree.query_pairs(self.distance_threshold)
+
+        pairs = [(self.df.index[i], self.df.index[j]) for (i,j) in queried_pairs]
+        pairs_isinnernuc = [(self.df.iloc[i,:]['InnerNuc'] + self.df.iloc[j,:]['InnerNuc'])/2 for (i,j) in queried_pairs]  #update later
+        pairs_isperinuc = [(self.df.iloc[i,:]['Perinuc'] + self.df.iloc[j,:]['Perinuc'])/2 for (i,j) in  queried_pairs] 
+        pairs_iscyto = [(self.df.iloc[i,:]['Cyto'] + self.df.iloc[j,:]['Cyto'])/2 for (i,j) in  queried_pairs] 
+        pairs_iscellperi = [(self.df.iloc[i,:]['CellPeri'] + self.df.iloc[j,:]['CellPeri'])/2 for (i,j) in queried_pairs] 
+        pairs, spatial_cat_0, spatial_cat_1, spatial_cat_2, spatial_cat_3  = self._category_counter(pairs, [pairs_isinnernuc, pairs_isperinuc, pairs_iscyto, pairs_iscellperi]).counter
+        pairs = pd.Series(pairs).reset_index()
+        cat_pairs_0 = pd.Series(spatial_cat_0).reset_index()
+        cat_pairs_1 = pd.Series(spatial_cat_1).reset_index()
+        cat_pairs_2 = pd.Series(spatial_cat_2).reset_index()
+        cat_pairs_3 = pd.Series(spatial_cat_3).reset_index()
+
+        if len(pairs):
+            obs_df = pd.pivot_table(pairs, index = 'level_0', columns ='level_1', values = 0).fillna(0)
+            obs_cat_0 = pd.pivot_table(cat_pairs_0 , index = 'level_0', columns ='level_1', values = 0).fillna(0)
+            obs_cat_1 = pd.pivot_table(cat_pairs_1, index = 'level_0', columns ='level_1', values = 0).fillna(0)
+            obs_cat_2 = pd.pivot_table(cat_pairs_2, index = 'level_0', columns ='level_1', values = 0).fillna(0)
+            obs_cat_3 = pd.pivot_table(cat_pairs_3, index = 'level_0', columns ='level_1', values = 0).fillna(0)
+            col_na_genes = list(set(self.geneList).difference(obs_df.columns))
+            row_na_genes = list(set(self.geneList).difference(obs_df.index))
+            col_na_genes = dict.fromkeys(col_na_genes, 0)  #nan genes
+            obs_df = obs_df.assign(**col_na_genes)
+            obs_cat_0 = obs_cat_0.assign(**col_na_genes)
+            obs_cat_1 = obs_cat_1.assign(**col_na_genes)
+            obs_cat_2 = obs_cat_2.assign(**col_na_genes)
+            obs_cat_3 = obs_cat_3.assign(**col_na_genes)
+
+            for row_na in row_na_genes:
+                obs_df.loc[row_na] = 0
+                obs_cat_0.loc[row_na] = 0
+                obs_cat_1.loc[row_na] = 0
+                obs_cat_2.loc[row_na] = 0
+                obs_cat_3.loc[row_na] = 0
+                
+
+            obs_df = obs_df.reindex(index = self.geneList, columns = self.geneList)
+            obs_cat_0 = obs_cat_0.reindex(index = self.geneList, columns = self.geneList)
+            obs_cat_1 = obs_cat_1.reindex(index = self.geneList, columns = self.geneList)
+            obs_cat_2 = obs_cat_2.reindex(index = self.geneList, columns = self.geneList)
+            obs_cat_3 = obs_cat_3.reindex(index = self.geneList, columns = self.geneList)
+        else:                                       #if no entry less than dist thresh
+            print('no entry less than dist thresh, total rna', self.curr_cell_df.shape[0])
+            obs_df = pd.DataFrame(0, self.geneList, self.geneList)
+            obs_cat_0, obs_cat_1, obs_cat_2, obs_cat_3  = obs_df.copy(), obs_df.copy(), obs_df.copy(),obs_df.copy()
+        arr_cat_0 = np.triu(obs_cat_0) + np.triu(obs_cat_0,1).T 
+        arr_cat_1 = np.triu(obs_cat_1) + np.triu(obs_cat_1,1).T 
+        arr_cat_2 = np.triu(obs_cat_2) + np.triu(obs_cat_2,1).T 
+        arr_cat_3 = np.triu(obs_cat_3) + np.triu(obs_cat_3,1).T 
+        return arr_cat_0, arr_cat_1, arr_cat_2, arr_cat_3
 
     def _calculate_ProximalPairs3D(self, args):
         cell_num, cell_id = args[0], args[1]
-        pp_model = ProximalPairs3D(geneList = self.geneList, df_loc = self.df.loc[self.df.uID == cell_id], distance_threshold = self.distance_threshold, 
+        pp_model = ProximalPairs3D(geneList = self.geneList, df = self.df.loc[self.df.uID == cell_id], distance_threshold = self.distance_threshold, 
                                    min_genecount = self.min_genecount, cell_id = cell_id)
-        return cell_num, pp_model.p_vals, pp_model.genecount.values.reshape(len(self.geneList))
+        return cell_num, pp_model.p_vals, pp_model.genecount.reshape(len(self.geneList))
     
     def run_ProximalPairs3D(self, distance_threshold, min_genecount, pval_matrix_name = None, gene_count_name = None):
         '''
@@ -547,6 +845,35 @@ class Instant():
         if gene_count_name:
             self._save_gene_count(gene_count_name)
         print(f"Cell-wise Proximal Pairs Time : {round(timeit.default_timer() - start, 2)} seconds")
+
+    def run_spatial_modulation(self, cell_locations, inter_cell_distance, spatial_modulation_name, alpha = 0.01):
+        self.cell_locations = pd.read_csv(cell_locations, index_col = 0)
+        binary_pp_pval = np.zeros(self.all_pval.shape)
+        binary_pp_pval[self.all_pval < alpha] = 1
+        #self.cell_locations = pd.read_csv(cell_locations, sep='\t', index_col = 0)
+        SpatialModulation(binary_pp_pval, self.cell_locations, inter_cell_distance, file_name = spatial_modulation_name, geneList = self.geneList, threads = self.threads)
+
+    def run_celltypecharacterization(self, cell_type, cell_labels, file_location, all2all = False):
+        cell_ids = self.df.uID.unique()
+        self.cell_labels = pd.read_csv(cell_labels)
+        if not all2all:
+            selected_cell_ids = self.cell_labels.loc[self.cell_labels.cell_type == cell_type].uID.values
+            rest_cell_ids = list(set(self.cell_labels.uID.values).difference(set(selected_cell_ids)))
+            selected_cell_indices = [np.where(cell_ids == x)[0][0] for x in selected_cell_ids]
+            rest_cell_indices = [np.where(cell_ids == x)[0][0] for x in rest_cell_ids]
+            #print(selected_cell_indices, rest_cell_indices)
+            CellTypeCharacterization(self.all_pval, self.all_gene_count, self.geneList, selected_cell_indices, rest_cell_indices, file_location=file_location, cell_type=cell_type, threads = self.threads)
+        else:
+            file_location = Path(file_location) / "ct_characterization"
+            subprocess.run(["mkdir", file_location])
+            for selected_cell_type in self.cell_labels.cell_type.unique():
+                file_location_ct = Path(file_location) / str(selected_cell_type)
+                subprocess.run(["mkdir", file_location_ct])
+                selected_cell_ids = self.cell_labels.loc[self.cell_labels.cell_type == selected_cell_type].uID.values
+                rest_cell_ids = list(set(self.cell_labels.uID.values).difference(set(selected_cell_ids)))
+                selected_cell_indices = [np.where(cell_ids == x)[0][0] for x in selected_cell_ids]
+                rest_cell_indices = [np.where(cell_ids == x)[0][0] for x in rest_cell_ids]
+                CellTypeCharacterization(self.all_pval, self.all_gene_count, self.geneList, selected_cell_indices, rest_cell_indices, file_location=file_location_ct, cell_type=selected_cell_type, threads = self.threads)
 
     def _save_globcolocal_csv(self, filename):
         self.global_coloc_df.to_csv(filename)

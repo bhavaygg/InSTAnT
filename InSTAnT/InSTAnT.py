@@ -275,7 +275,7 @@ class ProximalPairs3D():
             z_positions = np.where(self.df_cell[:,2] == z_axis)
             df_z = self.df_cell[z_positions, 0:2][0]
             genes_z = self.genes[z_positions]
-            if df.shape[0] > self.min_genecount:
+            if df_z.shape[0] > self.min_genecount:
                 model_single_axis = ProximalPairs(self.geneList, df_z, self.distance_threshold, mode = "3D", genes = genes_z)
                 obs_all.append(model_single_axis.obs)
                 num_trial_all.append(model_single_axis.num_trial)
@@ -407,7 +407,7 @@ class SpatialModulation:
         gene_id2 = [self.geneList[i] for i in np.triu_indices(self.num_genes)[1]]
         data = {'gene_id1': gene_id1, 'gene_id2': gene_id2, 'llr': llr, 'w_h1': self.w_h1_all, 'p_g_h1': self.p_h1_all, 'p_g_h0' : self.prob_global}
         pairwise_p_val_df = pd.DataFrame(data)
-        pairwise_p_val_df['g1g2'] = pairwise_p_val_df['gene_id1'] + ', ' + pairwise_p_val_df['gene_id2']
+        pairwise_p_val_df['g1g2'] = pairwise_p_val_df['gene_id1'].astype(str) + ', ' + pairwise_p_val_df['gene_id2'].astype(str)
         pairwise_p_val_df = pairwise_p_val_df.set_index(['g1g2'])
         pairwise_p_val_df = pairwise_p_val_df.sort_values(by=['llr'],ascending=False)
         pairwise_p_val_df.to_csv(self.filename)
@@ -416,7 +416,7 @@ class DifferentialColocalization():
     def __init__(self, all_p_vals, genecount, geneList, ct_spec_indices, rest_indices, cell_type, file_location, alpha = 0.01, threads = 1):
         self.threads = threads
         self.cell_type = cell_type
-        self.ct_spec_indices,self.rest_indices = ct_spec_indices, rest_indices
+        self.ct_spec_indices, self.rest_indices = ct_spec_indices, rest_indices
         self.all_p_vals = all_p_vals[ct_spec_indices+rest_indices, :, :]
         global gc
         gc = genecount[ct_spec_indices+rest_indices, :]
@@ -449,7 +449,7 @@ class DifferentialColocalization():
         data = {'gene_id1': gene_id1, 'gene_id2': gene_id2, 'ct_cond': cond_agg_coloc, second_df_name: agg_coloc, f'Conditional cells(Threshold<{str(0.01)})': obs, 'Present cells' : present_cells}
         pairwise_p_val_df = pd.DataFrame(data)
         pairwise_p_val_df['frac_cells'] = pairwise_p_val_df[f'Conditional cells(Threshold<{str(0.01)})']/pairwise_p_val_df['Present cells']
-        pairwise_p_val_df['g1g2'] = pairwise_p_val_df['gene_id1'] + ', ' + pairwise_p_val_df['gene_id2']
+        pairwise_p_val_df['g1g2'] = pairwise_p_val_df['gene_id1'].astype(str) + ', ' + pairwise_p_val_df['gene_id2'].astype(str)
         pairwise_p_val_df = pairwise_p_val_df.set_index(['g1g2'])
         pairwise_p_val_df = pairwise_p_val_df.sort_values(by=['ct_cond'])
         return pairwise_p_val_df
@@ -1105,6 +1105,7 @@ class Instant():
             num_transcripts += counts[n]
             #print(cell_vb id, counts[n])
             if counts[n] > min_genecount:
+                print(n, cell_id)
                 valid_cell_data.append([n, cell_id, genes])
             else:
                 logging.getLogger('InSTAnT').warn(f"min genecount less than {min_genecount} for cell id {cell_id}, Skipping ...")
@@ -1226,7 +1227,9 @@ class Instant():
         SpatialModulation(binary_pp_pval, self.cell_locations, inter_cell_distance, file_name = spatial_modulation_name, geneList = self.geneList, threads = self.threads)
 
     def run_differentialcolocalization(self, cell_type, cell_labels, file_location, all2all = False, alpha = 0.01):
-        cell_ids = self.df.uID.unique()
+        celllabel_encoder = LabelEncoder()
+        cell_ids = celllabel_encoder.fit_transform(self.df['uID'])
+        cell_ids, _ = np.unique(cell_ids, return_counts=True)
         self.cell_labels = pd.read_csv(cell_labels)
         print(self.cell_labels.shape)
         print(self.cell_labels.dtypes)
@@ -1235,10 +1238,9 @@ class Instant():
         if not all2all:
             selected_cell_ids = self.cell_labels[self.cell_labels.cell_type == cell_type].uID.values
             rest_cell_ids = list(set(self.cell_labels.uID.values).difference(set(selected_cell_ids)))
-            selected_cell_indices = [np.where(cell_ids == x)[0][0] for x in selected_cell_ids]
-            rest_cell_indices = [np.where(cell_ids == x)[0][0] for x in rest_cell_ids]
+            selected_cell_indices = [np.where(cell_ids == celllabel_encoder.transform(x))[0][0] for x in selected_cell_ids]
+            rest_cell_indices = [np.where(cell_ids == celllabel_encoder.transform(x))[0][0] for x in rest_cell_ids]
             #print(selected_cell_indices, rest_cell_indices)
-            print(len(selected_cell_indices), len(rest_cell_indices), len(selected_cell_indices +rest_cell_indices )), 
             DifferentialColocalization(self.all_pval, self.all_gene_count, self.geneList, selected_cell_indices, rest_cell_indices, file_location=file_location, cell_type=cell_type, threads = self.threads, alpha = alpha)
             print(f"Differential Colocalization for cell type {cell_type} Time : {round(timeit.default_timer() - start, 2)} seconds")
         else:
@@ -1249,8 +1251,8 @@ class Instant():
                 subprocess.run(["mkdir", file_location_ct])
                 selected_cell_ids = self.cell_labels[self.cell_labels.cell_type == selected_cell_type].uID.values
                 rest_cell_ids = list(set(self.cell_labels.uID.values).difference(set(selected_cell_ids)))
-                selected_cell_indices = [np.where(cell_ids == x)[0][0] for x in selected_cell_ids]
-                rest_cell_indices = [np.where(cell_ids == x)[0][0] for x in rest_cell_ids]
+                selected_cell_indices = [np.where(cell_ids == celllabel_encoder.transform([x])[0])[0][0] for x in selected_cell_ids]
+                rest_cell_indices = [np.where(cell_ids == celllabel_encoder.transform([x])[0])[0][0] for x in rest_cell_ids]
                 DifferentialColocalization(self.all_pval, self.all_gene_count, self.geneList, selected_cell_indices, rest_cell_indices, file_location=file_location_ct, cell_type=selected_cell_type, threads = self.threads, alpha = alpha)
             print(f"All2All Differential Colocalization Time : {round(timeit.default_timer() - start, 2)} seconds")
 
@@ -1292,7 +1294,7 @@ class Instant():
         data = {'gene_id1': gene_id1, 'gene_id2': gene_id2, 'p_val_cond': cond_agg_coloc, second_df_name: agg_coloc, f'Coloc. cells(Threshold<{str(alpha)})': obs, 'Present cells' : present_cells}
         pairwise_p_val_df = pd.DataFrame(data)
         pairwise_p_val_df['frac_cells'] = pairwise_p_val_df[f'Coloc. cells(Threshold<{str(alpha)})']/pairwise_p_val_df['Present cells']
-        pairwise_p_val_df['g1g2'] = pairwise_p_val_df['gene_id1'] + ', ' + pairwise_p_val_df['gene_id2']
+        pairwise_p_val_df['g1g2'] = pairwise_p_val_df['gene_id1'].astype(str) + ', ' + pairwise_p_val_df['gene_id2'].astype(str)
         pairwise_p_val_df = pairwise_p_val_df.set_index(['g1g2'])
         pairwise_p_val_df = pairwise_p_val_df.sort_values(by=['p_val_cond'])
         return pairwise_p_val_df

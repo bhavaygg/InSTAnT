@@ -235,7 +235,7 @@ class ProximalPairs():
         else:                                       #if no entry less than dist thresh
             #print('no entry less than dist thresh, total rna', self.curr_cell_df.shape[0])
             obs_df = pd.DataFrame(0, self.geneList, self.geneList)
-        arr2 = np.triu(obs_df) + np.triu(obs_df,1).T   #Making matrix symmetric  #ASK
+        arr2 = np.triu(obs_df, 1) + np.tril(obs_df).T   #Making matrix symmetric  #ASK
         return arr2
     
 class ProximalPairs3D():
@@ -624,7 +624,7 @@ class Instant():
                 - data: (String) Path to dataframe in the required format.
         '''
         self.filename = data
-        self.df = pd.read_csv(data, index_col=0)
+        self.df = pd.read_csv(data, index_col=0).sort_index()
         self.geneList = self.df.index.unique()
         print("Loaded Data. Number of Transcripts: ", len(self.df), ", Number of Genes: ", len(self.geneList), 
               ", Number of Cells: ", len(self.df.uID.unique()))
@@ -975,7 +975,7 @@ class Instant():
         if gene_count_name:
             self._save_gene_count(gene_count_name)
         self.df = df_copy
-        del df, df_copy
+        del df_copy
         print(f"Cell-wise Proximal Pairs Time : {round(timeit.default_timer() - start, 2)} seconds")
     
     def _spatial_category(self, distance_thresold_nucleus = 2.5, distance_threshold_cyto_nuclear = 2.5, distance_threshold_cyto_peri = 4):
@@ -1105,7 +1105,7 @@ class Instant():
             num_transcripts += counts[n]
             #print(cell_vb id, counts[n])
             if counts[n] > min_genecount:
-                print(n, cell_id)
+                #print(n, cell_id)
                 valid_cell_data.append([n, cell_id, genes])
             else:
                 logging.getLogger('InSTAnT').warn(f"min genecount less than {min_genecount} for cell id {cell_id}, Skipping ...")
@@ -1226,7 +1226,7 @@ class Instant():
         #self.cell_locations = pd.read_csv(cell_locations, sep='\t', index_col = 0)
         SpatialModulation(binary_pp_pval, self.cell_locations, inter_cell_distance, file_name = spatial_modulation_name, geneList = self.geneList, threads = self.threads)
 
-    def run_differentialcolocalization(self, cell_type, cell_labels, file_location, all2all = False, alpha = 0.01):
+    def run_differentialcolocalization(self, cell_type, cell_labels, file_location, all2all = False, alpha = 0.01, folder_name = "differential_colocalization"):
         celllabel_encoder = LabelEncoder()
         cell_ids = celllabel_encoder.fit_transform(self.df['uID'])
         cell_ids, _ = np.unique(cell_ids, return_counts=True)
@@ -1234,7 +1234,7 @@ class Instant():
         print(self.cell_labels.shape)
         print(self.cell_labels.dtypes)
         start = timeit.default_timer()
-        print(f"Running Cell type characterization now on {self.threads} threads")
+        print(f"Running Differential Colocalization now on {self.threads} threads")
         if not all2all:
             selected_cell_ids = self.cell_labels[self.cell_labels.cell_type == cell_type].uID.values
             rest_cell_ids = list(set(self.cell_labels.uID.values).difference(set(selected_cell_ids)))
@@ -1244,7 +1244,7 @@ class Instant():
             DifferentialColocalization(self.all_pval, self.all_gene_count, self.geneList, selected_cell_indices, rest_cell_indices, file_location=file_location, cell_type=cell_type, threads = self.threads, alpha = alpha)
             print(f"Differential Colocalization for cell type {cell_type} Time : {round(timeit.default_timer() - start, 2)} seconds")
         else:
-            file_location = Path(file_location) / "differential_colocalization"
+            file_location = Path(file_location) / folder_name
             subprocess.run(["mkdir", file_location])
             for selected_cell_type in self.cell_labels.cell_type.unique():
                 file_location_ct = Path(file_location) / str(selected_cell_type)

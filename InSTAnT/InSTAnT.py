@@ -1,26 +1,21 @@
-import pandas as pd
-import numpy as np
+import gc
 import pickle
 import timeit
-from scipy.spatial import cKDTree
-from scipy.stats import binom_test
-from collections import Counter
-from scipy.sparse import coo_matrix
-import multiprocessing as mp
-from sklearn.neighbors import NearestNeighbors
-from InSTAnT.poibin import PoiBin
-from InSTAnT.poisson_binomial import PoissonBinomial
-from numpy.random import default_rng
-import matplotlib.pyplot as plt
-from scipy.optimize import minimize
-from scipy.stats import multivariate_hypergeom
-from scipy.stats import hypergeom
-from pathlib import Path
 import subprocess
-import glob
-import gc
-import logging
+import pandas as pd
+import numpy as np
+from pathlib import Path
+import multiprocessing as mp
+import matplotlib.pyplot as plt
+from InSTAnT.poibin import PoiBin
+from scipy.spatial import cKDTree
+from collections import Counter
+from scipy.stats import hypergeom
+from scipy.stats import binom_test
+from scipy.optimize import minimize
 from sklearn.preprocessing import LabelEncoder
+from scipy.stats import multivariate_hypergeom
+from InSTAnT.poisson_binomial import PoissonBinomial
 
 class ConditionalGlobalColocalization():
     '''
@@ -83,9 +78,7 @@ class ConditionalGlobalColocalization():
         
     def _compute_pval(self, args):
         i, j = args[0], args[1]
-        print(i,j)
         pp_all_cells_local = np.frombuffer(pp_all_cells).reshape(pp_all_cells_shape)
-        #print(f"{i} {j}")
         p_ij = []
         for cell_id in range(self.num_cells):
             if self.transcript_count[cell_id, i] > self.min_transcript and self.transcript_count[cell_id, j] > self.min_transcript:
@@ -109,10 +102,8 @@ class ConditionalGlobalColocalization():
         share_np = np.frombuffer(share).reshape(prob_pairwise_all_cells.shape)
         # Copy data to our shared array.
         np.copyto(share_np, prob_pairwise_all_cells)
-        #pool = mp.Pool(self.threads)
         with mp.Pool(processes=self.threads, initializer=self._initializer_func, initargs=(prob_pairwise_all_cells, prob_pairwise_all_cells.shape), maxtasksperchild = 1) as pool:
             results = pool.map(self._compute_pval, [[i, j] for i in range(self.num_genes) for j in range(i, self.num_genes)])
-        #del self.prob_pairwise_all_cells
         coloc_matrix = np.ones((self.num_genes, self.num_genes))
         expected_coloc = np.zeros((self.num_genes, self.num_genes))
         for genepair_ij_result in results:
@@ -128,8 +119,6 @@ class ConditionalGlobalColocalization():
     
     def _compute_pval_serial(self, args):
         i, j = args[0], args[1]
-        print(i,j)
-        #print(f"{i} {j}")
         p_ij = []
         for cell_id in range(self.num_cells):
             if self.transcript_count[cell_id, i] > self.min_transcript and self.transcript_count[cell_id, j] > self.min_transcript:
@@ -148,7 +137,6 @@ class ConditionalGlobalColocalization():
         expected_coloc = np.zeros((self.num_genes, self.num_genes))
         for i in range(self.num_genes):
             for j in range(i, self.num_genes):
-                print(i,j)
                 _, _, pv, exp_pv = self._compute_pval_serial([i, j])
                 coloc_matrix[i,j], expected_coloc[i,j] = pv, exp_pv
                 coloc_matrix[j,i], expected_coloc[j,i] = coloc_matrix[i,j], expected_coloc[i,j]
@@ -170,13 +158,17 @@ class ProximalPairs():
     '''
     def __init__(self, geneList, df_loc, distance_threshold, mode="global", genes = None):
         self.geneList = geneList
-        #self.df = df_loc.copy()
-        #global curr_cell_df, obs, p_vals
+
         self.distance_threshold = distance_threshold
         if mode=='global':
             position_matrix_local = np.frombuffer(position_all_cells).reshape(position_all_cells_shape)
             cell_positions = np.where(position_matrix_local[:,2] == df_loc)
-            self.curr_cell_df = position_matrix_local[cell_positions, 0:2][0]#df.loc[df.uID == df_loc][['absX', 'absY']]#df_loc[['absX', 'absY']]
+            self.curr_cell_df = position_matrix_local[cell_positions, 0:2][0]
+            self.genes = genes[cell_positions]
+        elif mode == "global_3d":
+            position_matrix_local = np.frombuffer(position_all_cells).reshape(position_all_cells_shape)
+            cell_positions = np.where(position_matrix_local[:,3] == df_loc)
+            self.curr_cell_df = position_matrix_local[cell_positions, 0:3][0]
             self.genes = genes[cell_positions]
         else:
             self.curr_cell_df = df_loc
@@ -228,14 +220,11 @@ class ProximalPairs():
             col_na_genes = list(set(self.geneList).difference(obs_df.columns))
             row_na_genes = list(set(self.geneList).difference(obs_df.index))
             obs_df.loc[ : , col_na_genes] = 0
-            #obs_df.loc[row_na_genes] = 0
             for row_na in row_na_genes:
                 obs_df.loc[row_na] = 0
             obs_df = obs_df.reindex(index = self.geneList, columns = self.geneList)
         else:                                       #if no entry less than dist thresh
-            #print('no entry less than dist thresh, total rna', self.curr_cell_df.shape[0])
             obs_df = pd.DataFrame(0, self.geneList, self.geneList)
-        #arr2 = np.triu(obs_df, 1) + np.tril(obs_df).T   #Making matrix symmetric  #ASK
         temp= obs_df.values
         arr2 = temp + temp.T - temp*np.identity(len(temp))
         return arr2
@@ -253,16 +242,14 @@ class ProximalPairs3D():
         global df_cell, obs, p_vals
         position_matrix_local = np.frombuffer(position_all_cells).reshape(position_all_cells_shape)
         cell_positions = np.where(position_matrix_local[:,3] == df_loc)
-        self.df_cell = position_matrix_local[cell_positions, 0:3][0]#df.loc[df.uID == df_loc][['absX', 'absY']]#df_loc[['absX', 'absY']]
-        self.genes = genes[cell_positions]#df.loc[df.uID == df_loc][['absX', 'absY']]#df_loc[['absX', 'absY']]
-        #df_cell = df.loc[df.uID == df_loc]
+        self.df_cell = position_matrix_local[cell_positions, 0:3][0]
+        self.genes = genes[cell_positions]
         self.distance_threshold = distance_threshold
         self.geneList = geneList
         self.min_genecount = min_genecount
         self.cell_id = cell_id
         self.z_list = np.unique(self.df_cell[:, 2])
         obs, self.num_trial, self.genecount, self.prob_null = self.binom_params_all_axis()
-        # print('prob null is ', self.prob_null)
         self.p_vals = self.compute_p_val()
 
     def binom_params_all_axis(self):
@@ -272,8 +259,6 @@ class ProximalPairs3D():
         len_prob_null_all = []
         genecount_all = []
         for z_axis in self.z_list:
-            #df = df_cell[['uID', 'absX', 'absY', 'absZ']]
-            #df = df[df.absZ == z_axis][['uID', 'absX', 'absY']]
             z_positions = np.where(self.df_cell[:,2] == z_axis)
             df_z = self.df_cell[z_positions, 0:2][0]
             genes_z = self.genes[z_positions]
@@ -285,11 +270,8 @@ class ProximalPairs3D():
                 prob_null = model_single_axis.prob_null
                 prob_null_all.append(prob_null)
                 len_prob_null_all.append(len(model_single_axis.pairs))
-            # else:
-            #     logging.getLogger('InSTAnT').warn(f"min genecount less than {self.min_genecount} for cell id {self.cell_id} for z {z_axis}, Skipping ...")
 
         if len(prob_null_all) > 0 and sum(len_prob_null_all) > 0:
-            #print(len_prob_null_all)
             obs_all = np.array(obs_all).sum(axis = 0)
             num_trial_all = np.array(num_trial_all).sum(axis = 0)
             genecount_all = np.array(genecount_all).sum(axis = 0)
@@ -487,7 +469,6 @@ class DifferentialColocalization():
                 x = [beta, k-beta, alpha-beta, n2-alpha-k+beta]
                 r = [gamma, m-gamma, n1-gamma, N-m-n1+gamma]
                 curr_pmf = multivariate_hypergeom.pmf(x=x, m=r, n=n2)
-#                 print('curr_pmf', curr_pmf)
                 p_val_num = p_val_num + curr_pmf
         p_val_denom = hypergeom(N, n1, n2).pmf(alpha)
         return p_val_num/p_val_denom
@@ -560,7 +541,6 @@ class DifferentialColocalization():
         return all_pairs_cond_df, all_pairs_uncond_df, all_pairs_g1_df
     
     def compute_all_pairs_serial(self):
-        print("serial")
         print(f'Computing Cell Type Characterization for Hypergeometric for cell type - {self.cell_type}')
         print("Gene Marker Started ....")
         gene_marker_data = list(range(self.num_genes))
@@ -641,7 +621,7 @@ class Instant():
         self.df.index = np.random.permutation(self.df.index.values)
         self.geneList = self.df.index.unique()
     
-    def load_preprocessed_data_xenium(self, data, cluster_file, clusters):
+    def load_preprocessed_data_xenium(self, data, cluster_file, clusters, randomize = False):
         '''
         Load preprocessed data. Data should have the following columns - 
             ['gene', 'absX', 'absY', 'uID'] with 'gene' being the 1st column
@@ -649,15 +629,19 @@ class Instant():
                 - data: (String) Path to dataframe in the required format.
         '''
         self.filename = data
-        self.df = pd.read_csv(data, index_col=0)
+        self.df = pd.read_csv(data, index_col=0).sort_index()
         self.geneList = self.df.index.unique()
         print("Loaded Data. Number of Transcripts: ", len(self.df), ", Number of Genes: ", len(self.geneList), 
               ", Number of Cells: ", len(self.df.uID.unique()))
         cluster_df = pd.read_csv(cluster_file)
         cluster_df.rename(columns={'Barcode': 'uID'}, inplace=True)
+        cluster_df.uID = cluster_df.uID - 1
         cluster_df.set_index('uID', inplace=True)
         self.df = self.df.join(cluster_df, on='uID')
         self.df = self.df[self.df.Cluster.isin(clusters)]
+        if randomize:
+            self.df.index = np.random.permutation(self.df.index.values)
+            self.geneList = self.df.index.unique()
     
     def load_preprocessed_data_merfish(self, data, min_intensity = 0, min_area = 0):
         '''
@@ -672,7 +656,6 @@ class Instant():
         self.df = self.df[self.df.Total_brightness > min_intensity] #moved up
         self.df = self.df[self.df.Area >= min_area] #moved up
         self.geneList = self.df.index.unique()
-        print(self.df.shape)
         print("Loaded Data. Number of Transcripts: ", len(self.df), ", Number of Genes: ", len(self.geneList), 
               ", Number of Cells: ", len(self.df.uID.unique()))
         
@@ -815,7 +798,6 @@ class Instant():
     
     def _calculate_ProximalPairs(self, args):
         cell_num, cell_id, genes = args[0], args[1], args[2]
-        #print(f"PP {cell_num} {cell_id}")
         pp_model = ProximalPairs(geneList = self.geneList, df_loc = cell_id, distance_threshold = self.distance_threshold, genes = genes) #df_batch.loc[df_batch.uID == cell_id][['absX', 'absY']]
         return cell_num, pp_model.p_vals, pp_model.genecount.values.reshape(len(self.geneList))
     
@@ -870,6 +852,68 @@ class Instant():
             else:
                 print(f"Running PP now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
                 results = pool.map(self._calculate_ProximalPairs, valid_cell_data)
+        self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
+        self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = np.float16) 
+        for cell_i_result in results:
+            self.all_pval[cell_i_result[0]] = cell_i_result[1]
+            self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
+        print(f"Time to complete PP : ", timeit.default_timer() - check)
+        if pval_matrix_name:
+            self._save_pval_matrix(pval_matrix_name)
+        if gene_count_name:
+            self._save_gene_count(gene_count_name)
+        self.df = df_copy
+        del df_copy
+        print(f"Cell-wise Proximal Pairs Time : {round(timeit.default_timer() - start, 2)} seconds")
+    
+    def _calculate_ProximalPairs3D(self, args):
+        cell_num, cell_id, genes = args[0], args[1], args[2]
+        pp_model = ProximalPairs(geneList = self.geneList, df_loc = cell_id, distance_threshold = self.distance_threshold, 
+                                 genes = genes, mode = "global_3d") #df_batch.loc[df_batch.uID == cell_id][['absX', 'absY']]
+        return cell_num, pp_model.p_vals, pp_model.genecount.values.reshape(len(self.geneList))
+    
+    def run_ProximalPairs3D(self, distance_threshold, min_genecount, pval_matrix_name = None, gene_count_name = None, randomize = False):
+        '''
+        Calculates Proximal pairs for each gene pair for each input cell. Runs the ProximalPairs() class for each cell
+        and generates a 2d (num_genes, num_genes) matrix whose index (i,j) represents the p-value significance
+        of whether gene i and gene j are proximal gene pairs in that cell.
+            Arguments: 
+                - distance_threshold: (Integer) distance threshold at which to consider 2 genes proximal.
+                - min_genecount: (integer) Minimum number of transcripts in each cell.
+                - pval_matrix_name: (String) (Optional) if provided saves pvalue matrix using pickle at the input path.
+                - gene_count_name: (String) (Optional) if provided saves gene expression count matrix using pickle at the input path.
+        '''
+        self.distance_threshold = distance_threshold
+        cell_ids = np.unique(self.df.uID)
+        num_cells = len(cell_ids)
+        num_genes = len(self.geneList)
+        print(f"Initialised PP now on {self.threads} threads")
+        print("Number of cells: ", num_cells, ", Number of Genes: ", num_genes)
+        start = timeit.default_timer()
+        valid_cell_data = []
+        num_transcripts = 0
+        celllabel_encoder = LabelEncoder()
+        cell_labels = celllabel_encoder.fit_transform(self.df['uID'])
+        self.df['uID_encoded'] = cell_labels
+        genes = self.df.index
+        ids, counts = np.unique(self.df.uID_encoded.values, return_counts=True)
+        for n, cell_id in enumerate(ids):
+            num_transcripts += counts[n]
+            if counts[n] > min_genecount:
+                valid_cell_data.append([n, cell_id, genes])
+            else:
+                print(f"min genecount less than {min_genecount} for cell id {cell_ids[n]} across all Z, Skipping ...")
+        df_copy = self.df.copy()
+        del self.df
+        position_matrix = df_copy[['absX', 'absY', 'absZ', 'uID_encoded']].to_numpy().copy(order='C')
+        share_pp = mp.RawArray('d', len(position_matrix)*4)
+        share_pp_np = np.frombuffer(share_pp).reshape(position_matrix.shape)
+        np.copyto(share_pp_np, position_matrix)
+        check = timeit.default_timer()
+        pool = mp.Pool(processes = self.threads)
+        with mp.Pool(processes=self.threads, initializer=self._initializer_func_pp, initargs=(position_matrix, position_matrix.shape), maxtasksperchild = 1) as pool:
+            print(f"Running PP-3D now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
+            results = pool.map(self._calculate_ProximalPairs3D, valid_cell_data)
         self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
         self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = np.float16) 
         for cell_i_result in results:
@@ -986,13 +1030,13 @@ class Instant():
             self.perimem[n] = arr_cat_3
         return self.inner_nuc, self.peri_nuc, self.cytosolic, self.perimem
 
-    def _calculate_ProximalPairs3D(self, args):
+    def _calculate_ProximalPairs3D_slice(self, args):
         cell_num, cell_id, genes = args[0], args[1], args[2]
         pp_model = ProximalPairs3D(geneList = self.geneList, df_loc = cell_id, distance_threshold = self.distance_threshold, 
                                    min_genecount = self.min_genecount, cell_id = cell_id, genes = genes)
         return cell_num, pp_model.p_vals, pp_model.genecount.reshape(len(self.geneList))
     
-    def run_ProximalPairs3D(self, distance_threshold, min_genecount, pval_matrix_name = None, gene_count_name = None):
+    def run_ProximalPairs3D_slice(self, distance_threshold, min_genecount, pval_matrix_name = None, gene_count_name = None):
         '''
         Calculates Proximal pairs for each gene pair for each input cell. Runs the ProximalPairs() class for each cell
         and generates a 2d (num_genes, num_genes) matrix whose index (i,j) represents the p-value significance
@@ -1032,9 +1076,9 @@ class Instant():
         share_pp3d = mp.RawArray('d', len(position_matrix_3d)*4)
         share_pp3d_np = np.frombuffer(share_pp3d).reshape(position_matrix_3d.shape)
         np.copyto(share_pp3d_np, position_matrix_3d)
-        print(f"Running PP 3D now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
+        print(f"Running PP-3D slice now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
         with mp.Pool(processes=self.threads, initializer=self._initializer_func_pp, initargs=(position_matrix_3d, position_matrix_3d.shape), maxtasksperchild = 1) as pool:
-            results = pool.map(self._calculate_ProximalPairs3D, valid_cell_data)
+            results = pool.map(self._calculate_ProximalPairs3D_slice, valid_cell_data)
         self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
         self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = np.float16) 
         for cell_i_result in results:
@@ -1051,7 +1095,7 @@ class Instant():
     
     def run_spatial_modulation(self, cell_locations, inter_cell_distance, spatial_modulation_name, alpha = 0.01, randomize = False):
         '''
-        TODO write docstring
+        Probabilistic graphical model to detect spatially modulated gene pairs.
         Requires `run_ProximalPairs()` be run first to generate the p-value matrix for all cells. 
         Arguments: 
             - cell_locations: (String) Path to file contains locations for each cell. Should be in sorted order.
@@ -1133,7 +1177,7 @@ class Instant():
         if unstacked_global_pvals.shape[0] < 1048576 and unstacked_global_pvals.shape[1] < 16384:
             unstacked_global_pvals.to_excel(filename) 
         else:
-            unstacked_global_pvals.to_csv(filename) 
+            unstacked_global_pvals.to_csv(filename[:-5]+".csv") 
 
     def _binarize_adj_matrix(self, alpha):
         edge_all  = np.zeros(self.all_pval.shape)
@@ -1163,7 +1207,7 @@ class Instant():
         pairwise_p_val_df = pairwise_p_val_df.sort_values(by=['p_val_cond'])
         return pairwise_p_val_df
     
-    def run_GlobalColocalization(self, g = None, alpha_cellwise = 0.01, min_transcript = 0, high_precision = False, glob_coloc_name = None, exp_coloc_name = None, unstacked_pvals_name = None):
+    def run_GlobalColocalization(self, alpha_cellwise = 0.01, min_transcript = 0, high_precision = False, glob_coloc_name = None, exp_coloc_name = None, unstacked_pvals_name = None):
         '''
         Calculates global colocalization significance for each gene pair across all the cells. 
         Requires `run_ProximalPairs()` be run first to generate the p-value matrix for all cells. 
@@ -1178,7 +1222,7 @@ class Instant():
         '''
         print(f"Running Global Colocalization now on {self.threads} threads")
         start = timeit.default_timer()
-        global_coloc_model = ConditionalGlobalColocalization(all_pvals = self.all_pval, transcript_count = self.all_gene_count, alpha_cellwise = alpha_cellwise, min_transcript = min_transcript, show_det_pairs = show_det_pairs, threads = self.threads, high_precision = high_precision)
+        global_coloc_model = ConditionalGlobalColocalization(all_pvals = self.all_pval, transcript_count = self.all_gene_count, alpha_cellwise = alpha_cellwise, min_transcript = min_transcript, threads = self.threads, high_precision = high_precision)
         global_coloc, expected_coloc = global_coloc_model.global_colocalization()
         self.global_coloc_df = pd.DataFrame(global_coloc, index = self.geneList, columns = self.geneList)
         self.expected_coloc_df = pd.DataFrame(expected_coloc, index = self.geneList, columns = self.geneList)

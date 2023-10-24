@@ -54,7 +54,7 @@ References:
     http://dx.doi.org/10.1016/j.csda.2012.10.006.
 """
 
-import collections
+import collections.abc as collections
 import numpy as np
 
 

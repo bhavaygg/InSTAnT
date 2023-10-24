@@ -11,6 +11,13 @@ on a U2OS dataset. The dataset can be downloaded from here (Moffit et
 al., 2016, PNAS ) -
 http://zhuang.harvard.edu/MERFISHData/data_for_release.zip 
 
+We recommend using our `environment.yml` file to create a new conda environment to avoid issues with package incompatibility.
+
+```
+conda env create -f environment.yml
+```
+This will create a new conda environment with the name `instant` and has all dependancies installed. 
+
 First we will initialise the Instant class object. This object will allow us to calculate the proximal pairs and find global colocalized genes. The primary argument is `threads` which controls the number of threads the program uses. The arguements `min_intensity` and `min_area` are used only for MERFISH data preprocessing and can be skipped otherwise.
 
 ```

@@ -30,8 +30,12 @@ class ConditionalGlobalColocalization():
             - high_precision: (Boolean) High precision pvalue. Expect longer computer.
             - threads: (Integer) Number of threads to use.
     '''
-    def __init__(self, all_pvals, transcript_count, alpha_cellwise = 0.01, min_transcript = 0, show_det_pairs = 0, high_precision = False, threads = 1):
+    def __init__(self, all_pvals, transcript_count, alpha_cellwise = 0.01, min_transcript = 0, show_det_pairs = 0, high_precision = False, threads = 1, precision_mode = 'high'):
         global all_cell_pval
+        if precision_mode == 'high':
+            self.p_mode = 1e-64
+        else:
+            self.p_mode = 1e-16
         all_cell_pval = all_pvals
         self.alpha, self.show_det_pairs = alpha_cellwise, show_det_pairs
         self.transcript_count = transcript_count   #num_cells x num_genes
@@ -72,7 +76,7 @@ class ConditionalGlobalColocalization():
             curr_weight_pair[self.transcript_count[i] <= self.min_transcript] = 0 #removing lower count genes
             temp = curr_weight_pair[np.triu_indices(curr_weight_pair.shape[0])]
             # assert temp.sum() != 0
-            curr_weight_pair = curr_weight_pair/(temp.sum() + 1e-64)   #adding small number in denominator to avoid inf
+            curr_weight_pair = curr_weight_pair/(temp.sum() + self.p_mode)   #adding small number in denominator to avoid inf
             prob_pairwise_all_cells[i] = 1 - np.power((1 - curr_weight_pair), curr_edge.sum())
         return prob_pairwise_all_cells
         
@@ -589,10 +593,13 @@ class Instant():
             - min_intensity: (Optional) (Integer) Minimum intensity for Merfish.
             - min_area: (Optional) (Integer) Minimum Area for Merfish.
     '''
-    def __init__(self, threads = 1, min_intensity = 0, min_area = 0):
+    def __init__(self, threads = 1, precision_mode = "high", min_intensity = 0, min_area = 0):
         self.min_intensity, self.min_area = min_intensity, min_area
         self.threads = threads
-        
+        if precision_mode:
+            self.precision_mode = np.float64
+        else:
+            self.precision_mode = np.float16
 
     def load_preprocessed_data(self, data, inNucleus = False):
         '''
@@ -852,8 +859,8 @@ class Instant():
             else:
                 print(f"Running PP now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
                 results = pool.map(self._calculate_ProximalPairs, valid_cell_data)
-        self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
-        self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = np.float16) 
+        self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = self.precision_mode)
+        self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = self.precision_mode) 
         for cell_i_result in results:
             self.all_pval[cell_i_result[0]] = cell_i_result[1]
             self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
@@ -914,8 +921,8 @@ class Instant():
         with mp.Pool(processes=self.threads, initializer=self._initializer_func_pp, initargs=(position_matrix, position_matrix.shape), maxtasksperchild = 1) as pool:
             print(f"Running PP-3D now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
             results = pool.map(self._calculate_ProximalPairs3D, valid_cell_data)
-        self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
-        self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = np.float16) 
+        self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = self.precision_mode)
+        self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = self.precision_mode) 
         for cell_i_result in results:
             self.all_pval[cell_i_result[0]] = cell_i_result[1]
             self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
@@ -960,10 +967,10 @@ class Instant():
         self.distance_threshold = distance_threshold
         cell_ids = np.unique(self.df.uID)
         num_cells = len(cell_ids)
-        self.inner_nuc = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
-        self.peri_nuc = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
-        self.cytosolic = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
-        self.perimem = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
+        self.inner_nuc = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = self.precision_mode)
+        self.peri_nuc = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = self.precision_mode)
+        self.cytosolic = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = self.precision_mode)
+        self.perimem = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = self.precision_mode)
         for n, cell_id in enumerate(cell_ids):
             self.curr_cell_df = self.df[self.df.uID == cell_id].copy()
             spatial_cat_all = self._spatial_category(distance_thresold_nucleus, distance_threshold_cyto_nuclear, distance_threshold_cyto_peri)
@@ -1079,8 +1086,8 @@ class Instant():
         print(f"Running PP-3D slice now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
         with mp.Pool(processes=self.threads, initializer=self._initializer_func_pp, initargs=(position_matrix_3d, position_matrix_3d.shape), maxtasksperchild = 1) as pool:
             results = pool.map(self._calculate_ProximalPairs3D_slice, valid_cell_data)
-        self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = np.float16)
-        self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = np.float16) 
+        self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = self.precision_mode)
+        self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = self.precision_mode) 
         for cell_i_result in results:
             self.all_pval[cell_i_result[0]] = cell_i_result[1]
             self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
@@ -1222,7 +1229,7 @@ class Instant():
         '''
         print(f"Running Global Colocalization now on {self.threads} threads")
         start = timeit.default_timer()
-        global_coloc_model = ConditionalGlobalColocalization(all_pvals = self.all_pval, transcript_count = self.all_gene_count, alpha_cellwise = alpha_cellwise, min_transcript = min_transcript, threads = self.threads, high_precision = high_precision)
+        global_coloc_model = ConditionalGlobalColocalization(all_pvals = self.all_pval, transcript_count = self.all_gene_count, alpha_cellwise = alpha_cellwise, min_transcript = min_transcript, threads = self.threads, high_precision = high_precision, precision_mode = self.precision_mode)
         global_coloc, expected_coloc = global_coloc_model.global_colocalization()
         self.global_coloc_df = pd.DataFrame(global_coloc, index = self.geneList, columns = self.geneList)
         self.expected_coloc_df = pd.DataFrame(expected_coloc, index = self.geneList, columns = self.geneList)

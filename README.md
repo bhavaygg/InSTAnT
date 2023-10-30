@@ -18,10 +18,10 @@ conda env create -f environment.yml
 ```
 This will create a new conda environment with the name `instant` and has all dependancies installed. 
 
-First we will initialise the Instant class object. This object will allow us to calculate the proximal pairs and find global colocalized genes. The primary argument is `threads` which controls the number of threads the program uses. The arguements `min_intensity` and `min_area` are used only for MERFISH data preprocessing and can be skipped otherwise.
+First we will initialise the Instant class object. This object will allow us to calculate the proximal pairs and find global colocalized genes. The primary argument is `threads` which controls the number of threads the program uses. If you run into memory issues with the default settings, we suggest setting the `precision_mode` to `low`. The arguments `min_intensity` and `min_area` are used only for MERFISH data preprocessing and can be skipped otherwise.
 
 ```
-obj = Instant(threads = threads, min_intensity = 10**0.75, min_area = 3)
+obj = Instant(threads = threads, precision_mode = 'high', min_intensity = 10**0.75, min_area = 3)
 ```
 
 To load MERFISH data, we use the function `preprocess_and_load_data()`. `preprocess_and_load_data()` is used to preprocess and load MERFISH data ***only***. The final data is stored as a pandas DataFrame and the following columns `['gene', 'uID', 'absX', 'absY']`. Below is an example table for a 2D data (if the data is 3D, `absZ` column is also expected) - 
@@ -144,6 +144,7 @@ Arguments:
             - `cell_type_2`: *(String)* (Optional) Cell type 2 to calculate differential colocalization for. Required if mode == "1v1".
             - `mode`: *(String)* Either "1va" (One cell type vs All cell types), "1v1" (One cell type vs one cell type) or "ava" (All cell types vs All cell types).
             - `alpha`: *(Float)* *(Optional)* p-value significance threshold (>alpha_cellwise are converted to 1). Default = 0.01.
+            - `alpha_dc``: (Float) (Optional) pvalue signifcance threshold for unconditional differential colocalization. Default = 5e-6.
             - `folder_name`: *(String) *(Optional)* if mode == "ava", folder name inside the specified path in which to store results for each cell type. Default = "differential_colocalization".
 ```
 obj.run_differentialcolocalization(cell_type = None, mode = "a2a", 
@@ -162,39 +163,12 @@ The `cell_labels.csv` file must have 2 columns `uID` and `cell_type` which denot
 | 91749 | 27        |
 | 83131 | 27        |
 
-The function will create a folder named `folder_name` in the `file_location` location. The folder will contain a folder for each of the cell types selected to be analyzed and for each cell type contains 4 files.
-  - `{cell_type}_conditional.csv`
-    | gene          | 2010300C02Rik | Acsbg1 | Acta2 | Acvrl1 | Adamts2 |
-    | ------------- | ------------- | ------ | ----- | ------ | ------- |
-    | 2010300C02Rik | 1             | 1      | 1     | 1      | 1       |
-    | Acsbg1        | 1             | 1      | 1     | 1      | 1       |
-    | Acta2         | 1             | 1      | 1     | 1      | 1       |
-    | Acvrl1        | 1             | 1      | 1     | 1      | 1       |
-    | Adamts2       | 1             | 1      | 1     | 1      | 1       |
-    | Adamtsl1      | 1             | 1      | 1     | 1      | 1       |
-  - `{cell_type}_genemarkers.csv`
-    | gene     | 0        |
-    | -------- | -------- |
-    | Tacr1    | 0        |
-    | Tanc1    | 0.023006 |
-    | Th       | 0        |
-    | Thsd7a   | 0        |
-    | Tle4     | 1.34E-19 |
-    | Tmem132d | 7.33E-05 |
-  - `{cell_type}_unconditional.csv`
-    | gene          | 2010300C02Rik | Acsbg1   | Acta2    | Acvrl1   |
-    |  ------------- | ------------- | -------- | -------- | -------- |
-    | 2010300C02Rik | 0.768928      | 0.691713 | 0.957706 | 1        |
-    | Acsbg1        | 0.691713      | 0.987682 | 0.139965 | 1        |
-    | Acta2         | 0.957706      | 0.139965 | 0.536099 | 1        |
-    | Acvrl1        | 1             | 1        | 1        | 0.139965 |
-    | Adamts2       | 1             | 1        | 1        | 1        |
-    | Adamtsl1      | 1             | 0.519267 | 1        | 1        |
+The function will create a folder named `folder_name` in the `file_location` location. The folder will contain a folder for each of the cell types selected to be analyzed and for each cell type contains a single file will all relevant outputs.
   - `{cell_type}_unstacked.csv`
-    | g1g2                 | gene_id1      | gene_id2 | ct_cond  | Unconditional | Conditional cells(Threshold<0.01) | Present cells | frac_cells |
-    | -------------------- | ------------- | -------- | -------- | ------------- | --------------------------------- | ------------- | ---------- |
-    | Epha4, Prox1         | Epha4         | Prox1    | 2.26E-14 | 7.81E-17      | 98                                | 4723          | 0.02075    |
-    | 2010300C02Rik, Pdzd2 | 2010300C02Rik | Pdzd2    | 4.91E-13 | 2.68E-13      | 44                                | 4054          | 0.010853   |
-    | Bhlhe22, Igfbp5      | Bhlhe22       | Igfbp5   | 1.03E-12 | 1.36E-15      | 52                                | 4623          | 0.011248   |
-    | Nrn1, Plekha2        | Nrn1          | Plekha2  | 2.76E-12 | 3.07E-12      | 51                                | 4712          | 0.010823   |
-    | 2010300C02Rik, Prox1 | 2010300C02Rik | Prox1    | 6.39E-12 | 5.03E-12      | 59                                | 4753          | 0.012413   |
+    | g1,g2           | p_uncond | p_cond_g1 | p_cond_g2 | p_g1_expression | p_g2_expression | min_g1g2 | g1_rank | g2_rank | min_rank |
+    | --------------- | -------- | --------- | --------- | --------------- | --------------- | -------- | ------- | ------- | -------- |
+    | Slc17a6, Syt4   | 2.27E-75 | 6.75E-08  | 6.67E-64  | 5.8E-304        | 1.48E-17        | 5.8E-304 | 1       | 22      | 1        |
+    | Cbln1, Slc17a6  | 2.58E-58 | 6.29E-14  | 5.01E-12  | 2.1E-131        | 5.8E-304        | 5.8E-304 | 2       | 1       | 1        |
+    | Gabra1, Slc17a6 | 1.01E-53 | 6.75E-45  | 5.89E-06  | 4.39E-13        | 5.8E-304        | 5.8E-304 | 27      | 1       | 1        |
+    | Cbln1, Gpr165   | 6.64E-39 | 1.5E-08   | 6.27E-43  | 2.1E-131        | 0.999642        | 2.1E-131 | 2       | 95      | 2        |
+    | Cbln1, Syt4     | 4.29E-36 | 1.55E-10  | 1.35E-32  | 2.1E-131        | 1.48E-17        | 2.1E-131 | 2       | 22      | 2        |

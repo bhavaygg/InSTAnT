@@ -11,10 +11,10 @@ on a U2OS dataset. The dataset can be downloaded from here (Moffit et
 al., 2016, PNAS ) -
 http://zhuang.harvard.edu/MERFISHData/data_for_release.zip 
 
-First we will initialise the Instant class object. This object will allow us to calculate the proximal pairs and find global colocalized genes. The primary argument is `threads` which controls the number of threads the program uses. The arguements `min_intensity` and `min_area` are used only for MERFISH data preprocessing and can be skipped otherwise.
+First we will initialise the Instant class object. This object will allow us to calculate the proximal pairs and find global colocalized genes. The primary argument is `threads` which controls the number of threads the program uses. If you run into memory issues with the default settings, we suggest setting the `precision_mode` to `low`. The arguments `min_intensity` and `min_area` are used only for MERFISH data preprocessing and can be skipped otherwise.
 
 ```
-obj = Instant(threads = threads, min_intensity = 10**0.75, min_area = 3)
+obj = Instant(threads = threads, precision_mode = 'high', min_intensity = 10**0.75, min_area = 3)
 ```
 
 To load MERFISH data, we use the function `preprocess_and_load_data()`. `preprocess_and_load_data()` is used to preprocess and load MERFISH data ***only***. The final data is stored as a pandas DataFrame and the following columns `['gene', 'uID', 'absX', 'absY']`. Below is an example table for a 2D data (if the data is 3D, `absZ` column is also expected) - 

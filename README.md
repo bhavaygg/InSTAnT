@@ -1,7 +1,7 @@
 InSTAnT
 =========
 
-**InSTAnT** is a toolkit to idetify gene pairs which are d-colocalized
+**InSTAnT** is a toolkit to identify gene pairs which are d-colocalized
 from single molecule measurement data e.g. MERFISH or SeqFISH. A gene
 pair is d-colocalized when their transcripts are within distance d
 across many cells.

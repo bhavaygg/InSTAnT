@@ -528,7 +528,6 @@ class DifferentialColocalization():
     def compute_all_pairs(self):
         print(f'Computing Cell Type Characterization for Hypergeometric for cell type - {self.cell_type}')
         pool = mp.Pool(processes = self.threads)
-        print("Unconditional Started ....")
         unconditional_data = [(i, j) for i in range(self.num_genes) for j in range(i, self.num_genes)]
         unconditional_data_results = pool.map(self._compute_unconditional, unconditional_data)
         all_pairs_uncond = np.ones((self.num_genes, self.num_genes))
@@ -536,26 +535,20 @@ class DifferentialColocalization():
             all_pairs_uncond[result[0]][result[1]] = result[2]
             all_pairs_uncond[result[1]][result[0]] = result[2]
         del unconditional_data_results
-        print("Unconditional Completed ....")
 
-        print("Gene Marker Started ....")
         gene_marker_data = list(range(self.num_genes))
         gene_marker_data_results = pool.map(self._compute_genemarker, gene_marker_data)
         all_pairs_g1 = np.ones((self.num_genes,))
         for result in gene_marker_data_results:
             all_pairs_g1[result[0]] = result[1]
         del gene_marker_data_results
-        print("Gene Marker Completed ....")
 
-        print("Conditional Started ....")
         conditional_data = [(i, j) for i in range(self.num_genes) for j in range(self.num_genes) if all_pairs_uncond[i][j] <= 1e-3]
         conditional_data_results = pool.map(self._compute_conditional, conditional_data)
         all_pairs_cond = np.ones((self.num_genes, self.num_genes))
         for result in conditional_data_results:
             all_pairs_cond[result[0]][result[1]] = result[2]
         del conditional_data_results
-        print("Conditional Completed ....")
-
 
         all_pairs_cond_df = pd.DataFrame(all_pairs_cond, index = self.geneList, columns = self.geneList)
         all_pairs_uncond_df = pd.DataFrame(all_pairs_uncond, index = self.geneList, columns = self.geneList)
@@ -630,7 +623,15 @@ class Instant():
         '''
         self.filename = data
         if Path(self.filename).suffix.lower() == ".csv":
-            self.df = pd.read_csv(data, index_col=0).sort_index()
+            self.df = pd.read_csv(data)
+            counts = pd.crosstab(self.df.uID, self.df.gene)
+            adata = ad.AnnData(counts.values)
+            adata.obs_names = counts.index.values
+            adata.var_names = counts.columns.values
+            adata.uns["transcripts"] = self.df
+            adata.write(Path(self.filename).with_suffix('.h5ad'), compression="gzip")
+            self.filename = Path(self.filename).with_suffix('.h5ad')
+            self.df = self.df.set_index('gene').sort_index()
         elif Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
             self.df = adata.uns['transcripts']
@@ -1153,17 +1154,18 @@ class Instant():
             - alpha: (Float) (Optional) pvalue signifcance threshold (>alpha_cellwise are converted to 1). Default = 0.01.
             - randomize: (Boolean) (Optional) Shuffle cell locations. Default = False".
         '''
-        if cell_locations != None:
-            if Path(cell_locations).suffix.lower() == ".csv":
-                self.cell_locations = pd.read_csv(cell_locations)
-        elif Path(self.filename).suffix.lower() == ".h5ad":
+        if Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
-            self.cell_locations = adata.uns['cell_locations']
+            if cell_locations != None:
+                if Path(cell_locations).suffix.lower() == ".csv":
+                    self.cell_locations = pd.read_csv(cell_locations)
+            else:
+                try:
+                    self.cell_locations = adata.uns['cell_locations']
+                except:
+                    raise("Cell Locations file format incorrect")  
             self.all_pval = adata.uns['pp_test_pvalues']
             self.all_gene_count = adata.obsm['genecount']
-        else:
-            raise("Cell Locations file format incorrect")  
-        print(self.cell_locations) 
         binary_pp_pval = np.zeros(self.all_pval.shape)
         binary_pp_pval[self.all_pval < alpha] = 1
         if randomize:
@@ -1190,20 +1192,22 @@ class Instant():
         celllabel_encoder = LabelEncoder()
         cell_ids = celllabel_encoder.fit_transform(self.df['uID'])
         cell_ids, _ = np.unique(cell_ids, return_counts=True)
-        if cell_labels != None:
-            if Path(cell_labels).suffix.lower() == ".csv":
-                self.cell_labels = pd.read_csv(cell_labels)
-        elif Path(self.filename).suffix.lower() == ".h5ad":
+        if Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
-            self.cell_labels = adata.obs
-            self.cell_labels['uID'] = self.cell_labels.index.values
+            if cell_labels != None:
+                if Path(cell_labels).suffix.lower() == ".csv":
+                    self.cell_labels = pd.read_csv(cell_labels)
+            else:
+                try:
+                    self.cell_labels = adata.obs
+                    self.cell_labels['uID'] = self.cell_labels.index.values
+                except:
+                    raise("Cell Label file format incorrect")        
             self.all_pval = adata.uns['pp_test_pvalues']
             self.all_gene_count = adata.obsm['genecount']
             if 'differential_colocalization' not in adata.uns:
                 adata.uns['differential_colocalization'] = {}
             adata.write(self.filename, compression="gzip")
-        else:
-            raise("Cell Label file format incorrect")        
         start = timeit.default_timer()
         print(f"Running Differential Colocalization now on {self.threads} threads")
         if mode == "1va":
@@ -1303,16 +1307,13 @@ class Instant():
             adata = ad.read_h5ad(self.filename)
             self.all_pval = adata.uns['pp_test_pvalues']
             self.all_gene_count = adata.obsm['genecount']
-        print(self.all_pval.shape, self.all_gene_count.shape)
         start = timeit.default_timer()
         global_coloc_model = ConditionalGlobalColocalization(all_pvals = self.all_pval, transcript_count = self.all_gene_count, alpha_cellwise = alpha_cellwise, min_transcript = min_transcript, threads = self.threads, high_precision = high_precision, precision_mode = self.precision_mode)
         global_coloc, expected_coloc = global_coloc_model.global_colocalization()
         self.global_coloc_df = pd.DataFrame(global_coloc, index = self.geneList, columns = self.geneList)
         self.expected_coloc_df = pd.DataFrame(expected_coloc, index = self.geneList, columns = self.geneList)
         if Path(self.filename).suffix.lower() == ".h5ad":
-            adata.uns['cpb_global_colocalization'] = self.global_coloc_df
-            adata.uns['cpb_expected_colocalization'] = self.expected_coloc_df
-            adata.uns['cpb_unstacked_colocalization'] = self._save_unstacked_pvals_adata(alpha_cellwise, min_transcript)
+            adata.uns['cpb_results'] = self._save_unstacked_pvals_adata(alpha_cellwise, min_transcript)
             adata.write(self.filename, compression="gzip")
         if glob_coloc_name:
             self._save_globcolocal_csv(glob_coloc_name)

@@ -1,7 +1,7 @@
 InSTAnT
 =========
 
-**InSTAnT** is a toolkit to idetify gene pairs which are d-colocalized
+**InSTAnT** is a toolkit to identify gene pairs which are d-colocalized
 from single molecule measurement data e.g. MERFISH or SeqFISH. A gene
 pair is d-colocalized when their transcripts are within distance d
 across many cells.
@@ -41,7 +41,7 @@ If the data has been preprocessed, we can load it like below.
 ```
 obj.load_preprocessed_data(data = f'data/u2os_new/data_processed.csv')
 ```
-Since, subcellular spatial transcriptomic data is generally present as `.csv` file containing all the transcripts, the primary input format is `.csv`. However, we have included the ability to format the data into an AnnData object and save the results of the subsequent analysis in that object. We convert the input file to an AnnData object and save it with the same name into the same directory. All the subsequent analysis will be updated and saved into the same file.
+Since, subcellular spatial transcriptomic data is generally present as `.csv` file containing all the transcripts, the primary input format is `.csv`. However, we have included the ability to format the data into an AnnData object and save the results of the subsequent analysis in that object. We convert the input file to an AnnData object and save it with the same name into the same directory. All the subsequent analysis will be updated and saved into the same file. We also provide the functionality to save any of the results seperately as individual files.
 
 **Note** - The function also supports loading an AnnData object. Currently, we only accept files in `.h5ad` format. Since, Anndata objects are not natively designed for subcellular datasets, we expect the `.csv` file containing the transcript information to be present in `adata.uns['transcripts']`. If you wish to run differential colocalization, cell type labels are required, which are expected in `adata.obs` while for spatial modulation, cell locations are required, which are expected in `adata.uns['cell_locations']`. If these files are not present in the AnnData object, they must be supplied to the specific funtions seperately. If an AnnData object is provided during this loading, all the subsequent outputs are saved and updated in the specified file. 
 
@@ -59,13 +59,15 @@ obj.run_ProximalPairs(distance_threshold = 4, min_genecount = 20,
     pval_matrix_name = f"data/u2os/rep3/rep3_pvals.pkl", 
     gene_count_name = f"data/u2os/rep3/rep3_gene_count.pkl")
 ```
-Since calculating proximal pairs is the most time-consuming function, it is recommended to save the matrices for further analysis using our other features. Proximal Pairs calculation has 3 variants - 
+Proximal Pairs calculation has 3 variants - 
   - `run_ProximalPairs()` - Designed for 2D subcellular spatial transcriptomics data.
   - `run_ProximalPairs3D()` - Designed for 3D subcellular spatial transcriptomics data with continuos z-axis.
   - `run_ProximalPairs3D_slice()` - Designed for 3D subcellular spatial transcriptomics data with discrete/sliced z-axis.
 (**Note** - For AnnData objects. These results are stored in `adata.uns['pp_test_pvalues']`.)
 
-Next, we can find which gene pairs are significantly colocalized globally using the `run_GlobalColocalization()` function. The following arguments are used by `run_GlobalColocalization()`
+All subsequent analysis require `run_ProximalPairs()` to be run first to generate the p-value matrix for all cells.
+
+Next, we can use the output to find which gene pairs are significantly colocalized globally using the `run_GlobalColocalization()` function. The following arguments are used by `run_GlobalColocalization()`
   - `alpha_cellwise`: *(Float)* Pvalue signifcance threshold (>alpha_cellwise are converted to 1). Default = 0.05.
   - `min_transcript`: *(Float)* Gene expression lower threshold. Default = 0.
   - `high_precision`: *(Boolean*) High precision pvalue. Expect a longer compute time. Default = False.
@@ -79,11 +81,6 @@ obj.run_GlobalColocalization(
     glob_coloc_name = f"data/u2os/rep3/global_colocalization.csv", 
     exp_coloc_name = f"data/u2os/rep3/expected_colocalization.csv", 
     unstacked_pvals_name = f"data/u2os/rep3/unstacked_global_pvals.csv")
-```
-Since performing the ProximalPairs is a time-consuming step but necessary for calculating Global Colocalization, we have added the support to load the outputs of ProximalPairs just so that you don't need to rerun them. Apart from loading the data using `load_preprocessed_data(),` you must use the functions below to load the p-value matrix and the gene counts. (**Note** - This is not required if you have used an AnnData object initially. The results are automically stored and saved.)
-```
-obj.load_pval_matrix(f"data/u2os/rep3/rep3_pvals.pkl")
-obj.load_gene_count(f"data/u2os/rep3/rep3_gene_count.pkl")
 ```
 
 The final outputs are 3 CSV files - 
@@ -121,7 +118,7 @@ Next, we will use InSTAnT's spatial modulation analyses to find spatially modula
 ```
 obj.run_spatial_modulation(f"data/u2os/rep3/cells_locations.csv", inter_cell_distance = 100, spatial_modulation_name = f"data/u2os/rep3/spatial_modulation.csv")
 ```
-The `cell_locations` file should be a `.csv` file with the uID of the cells in sorted order and as the index of the file. The next 2 columns should be the x and y position of that cell respectively. (For AnnData, cell locations are expected in `adata.uns['cell_locations']`)
+The `cell_locations` file should be a `.csv` file with the uID of the cells in sorted order and as the index of the file. The next 2 columns should be the x and y position of that cell respectively. (if provided in the AnnData file during initialization, cell locations are expected in `adata.uns['cell_locations']`)
 
 | uID  | x_centroid | y_centroid |
 | ---- | ---------- | ---------- |
@@ -148,8 +145,6 @@ Lastly, we will calculate the cell type specificity of InSTAnT categorized d-col
   - `1va`: Compares colocalization for genes in the input cell type vs all other cell types.
   - `1v1`: Compares colocalization for genes in the input cell type 1 vs input cell type 2.
   - `ava`: Compares colocalization for genes for all cell types vs all other cell types.
-
-Requires `run_ProximalPairs()` to be run first to generate the p-value matrix for all cells.
 
 Arguments: 
  - `cell_type`: *(String)* Cell type to calculate differential colocalization for. Is ignored if mode == "ava".

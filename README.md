@@ -1,4 +1,4 @@
-InSTAnT
+-0InSTAnT
 =========
 
 **InSTAnT** is a toolkit to idetify gene pairs which are d-colocalized
@@ -10,6 +10,8 @@ This repository contains implementation of PP Test and CPB test and demo
 on a U2OS dataset. The dataset can be downloaded from here (Moffit et
 al., 2016, PNAS ) -
 http://zhuang.harvard.edu/MERFISHData/data_for_release.zip 
+
+##### UPDATE: Added support for AnnData input/output.
 
 We recommend using our `environment.yml` file to create a new conda environment to avoid issues with package incompatibility.
 
@@ -39,6 +41,8 @@ If the data has been preprocessed, we can load it like below.
 ```
 obj.load_preprocessed_data(data = f'data/u2os_new/data_processed.csv')
 ```
+
+**Note** - The function also supports loading an AnnData object. Currently, we only accept files in `.h5ad` format. Since, Anndata objects are not natively designed for subcellular datasets, we expect the `.csv` file containing the transcript information to be present in `adata.uns['transcripts']`. If you wish to run differential colocalization, cell type labels are required, which are expected in `adata.obs` while for spatial modulation, cell locations are required, which are expected in `adata.uns['cell_locations']`. If an AnnData object is provided during this loading, all the subsequent outputs are saved and updated in the specified file. 
 
 The dataframe is loaded in the object variable `df` and can be accessed through `obj.df`. After the data has been loaded, we can calculate each cell's proximal gene pairs using the `run_ProximalPairs()` function. The following arguments are used by `run_ProximalPairs()`
   - `distance_threshold`: *(Integer)* Distance threshold at which to consider 2 genes proximal.
@@ -70,7 +74,7 @@ obj.run_GlobalColocalization(
     exp_coloc_name = f"data/u2os/rep3/expected_colocalization.csv", 
     unstacked_pvals_name = f"data/u2os/rep3/unstacked_global_pvals.csv")
 ```
-Since performing the ProximalPairs is a time-consuming step but necessary for calculating Global Colocalization, we have added the support to load the outputs of ProximalPairs just so that you don't need to rerun them. Apart from loading the data using `load_preprocessed_data(),` you must use the functions below to load the p-value matrix and the gene counts. 
+Since performing the ProximalPairs is a time-consuming step but necessary for calculating Global Colocalization, we have added the support to load the outputs of ProximalPairs just so that you don't need to rerun them. Apart from loading the data using `load_preprocessed_data(),` you must use the functions below to load the p-value matrix and the gene counts. (**Note** - This is not required if you have used an AnnData object initially. The results are automically stored and saved.)
 ```
 obj.load_pval_matrix(f"data/u2os/rep3/rep3_pvals.pkl")
 obj.load_gene_count(f"data/u2os/rep3/rep3_gene_count.pkl")
@@ -100,17 +104,18 @@ The final outputs are 3 CSV files -
     | Col1a1, Fbln2 | Col1a1   | Fbln2    | \-1.7E-14  | 4.629268       | 73                           | 177           | 0.412429   |
     | Col1a1, Bgn   | Col1a1   | Bgn      | \-1.6E-14  | 5.360849       | 71                           | 178           | 0.398876   |
 
+(**Note** - For AnnData objects. These results are stored in `adata.uns['cpb_global_colocalization']`, `adata.uns['cpb_expected_colocalization']`, `adata.uns['cpb_unstacked_colocalization']` respectively.)
 
 Next, we will use InSTAnT's spatial modulation analyses to find spatially modulated gene pairs. We use the `run_spatial_modulation()` function for this. The following arguments are used by `run_spatial_modulation()`
-  - `cell_locations`: *(String)* Path to a CSV file contains locations for each cell. It should be in sorted order.
   - `inter_cell_distance`: *(Float)* Maximum distance between cells at which they are considered proximal.
-  - `spatial_modulation_name`: *(String)* Path and name of the output Excel file.
+  - `cell_locations`: *(String)* *(Optional)* Path to file contains locations for each cell. Should be in sorted order. If not provided, cell locations are expected to be provided in `adata.uns['cell_locations']` in the AnnData file specified during initialization.
+  - `spatial_modulation_name`: *(String)* *(Optional)* Path and name of the output Excel file.
   - `alpha`: *(Float)* *(Optional)* p-value significance threshold (>alpha_cellwise are converted to 1). Default = 0.01.
   - `randomize`: *(Boolean)* *(Optional)* Shuffle cell locations. Default = False.
 ```
 obj.run_spatial_modulation(f"data/u2os/rep3/cells_locations.csv", inter_cell_distance = 100, spatial_modulation_name = f"data/u2os/rep3/spatial_modulation.csv")
 ```
-The `cell_locations` file should be a `CSV` file with the uID of the cells in sorted order and as the index of the file. The next 2 columns should be the x and y position of that cell respectively.
+The `cell_locations` file should be a `CSV` file with the uID of the cells in sorted order and as the index of the file. The next 2 columns should be the x and y position of that cell respectively. (For AnnData cell locations are expected in `adata.uns['cell_locations']`)
 
 | uID  | x_centroid | y_centroid |
 | ---- | ---------- | ---------- |
@@ -131,6 +136,7 @@ The output is an Excel file containing the gene pairs and the log-likelihood rat
 | MALAT1, SRRM2  | MALAT1   | SRRM2    | 47.82571 | 0.353254 | 0.410644 | 0.409021 |
 | COL5A1, FBN2   | COL5A1   | FBN2     | 47.62671 | 0.348113 | 0.574713 | 0.576769 |
 
+(**Note** - For AnnData objects. These results are stored in `adata.uns['spatial_modulation']`.)
 
 Lastly, we will calculate the cell type specificity of InSTAnT categorized d-colocalized gene pair. We call it Differential Colocalization and the function `run_differentialcolocalization()` is used for it. There are 3 different modes in which it can be run - 
   - `1va`: Compares colocalization for genes in the input cell type vs all other cell types.
@@ -139,12 +145,12 @@ Lastly, we will calculate the cell type specificity of InSTAnT categorized d-col
 Requires `run_ProximalPairs()` to be run first to generate the p-value matrix for all cells. 
 Arguments: 
             - `cell_type`: *(String)* Cell type to calculate differential colocalization for. Is ignored if mode == "ava".
-            - `cell_labels`: *(String)* Path to the CSV file contains the cell type for each cell.
-            - `file_location`: *(String)* Directory in which to store output files. if mode == "ava", creates a new directory in this path to store all results.
+            - `cell_labels`: *(String)* *(Optional)* Path to the CSV file contains the cell type for each cell.
+            - `file_location`: *(String)* *(Optional)* Directory in which to store output files. if mode == "ava", creates a new directory in this path to store all results.
             - `cell_type_2`: *(String)* (Optional) Cell type 2 to calculate differential colocalization for. Required if mode == "1v1".
             - `mode`: *(String)* Either "1va" (One cell type vs All cell types), "1v1" (One cell type vs one cell type) or "ava" (All cell types vs All cell types).
             - `alpha`: *(Float)* *(Optional)* p-value significance threshold (>alpha_cellwise are converted to 1). Default = 0.01.
-            - `alpha_dc``: (Float) (Optional) pvalue signifcance threshold for unconditional differential colocalization. Default = 5e-6.
+            - `alpha_dc`: (Float) (Optional) pvalue signifcance threshold for unconditional differential colocalization. Default = 5e-6.
             - `folder_name`: *(String) *(Optional)* if mode == "ava", folder name inside the specified path in which to store results for each cell type. Default = "differential_colocalization".
 ```
 obj.run_differentialcolocalization(cell_type = None, mode = "a2a", 
@@ -172,3 +178,5 @@ The function will create a folder named `folder_name` in the `file_location` loc
     | Gabra1, Slc17a6 | 1.01E-53 | 6.75E-45  | 5.89E-06  | 4.39E-13        | 5.8E-304        | 5.8E-304 | 27      | 1       | 1        |
     | Cbln1, Gpr165   | 6.64E-39 | 1.5E-08   | 6.27E-43  | 2.1E-131        | 0.999642        | 2.1E-131 | 2       | 95      | 2        |
     | Cbln1, Syt4     | 4.29E-36 | 1.55E-10  | 1.35E-32  | 2.1E-131        | 1.48E-17        | 2.1E-131 | 2       | 22      | 2        |
+
+(**Note** - For AnnData objects. These results are stored in `adata.uns['differential_colocalization']`. `adata.uns['differential_colocalization']` is a dictionary with keys based on the analysis. For `1va` and `ava`, the key is `{cell_type}` and for `1v1`, the key is `{cell_type_1)_vs_{cell_type_2}`.

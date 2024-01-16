@@ -1,8 +1,8 @@
 
 from distutils.core import setup
 setup(
-  name = 'InSTAnT',         
-  packages = ['InSTAnT'],   
+  name = 'sc-instant',         
+  packages = ['sc-instant'],   
   version = '1.0',      
   license='MIT',        
   description = 'InSTAnT is a toolkit to identify gene pairs which are d-colocalized from single molecule measurement data.',   

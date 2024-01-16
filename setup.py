@@ -1,5 +1,9 @@
 
 from distutils.core import setup
+
+with open('requirements.txt') as f:
+    required = f.read().splitlines()
+
 setup(
   name = 'sc-instant',
   packages=['InSTAnT'],
@@ -13,13 +17,7 @@ setup(
   author_email = 'anu.ankesh@gmail.com, bhavayaggarwal07@gmail.com',      
   url = 'https://github.com/anurendra, https://github.com/Chokerino',   
   keywords = ['InSTAnT', 'Python'],   
-  install_requires=[            
-          'numpy',
-          'scipy',
-          'pandas',
-          'pickle',
-          'scikit-learn',
-      ],
+  install_requires=required,
   classifiers=[
     'Development Status :: 3 - Alpha',      
     'Intended Audience :: Developers',      

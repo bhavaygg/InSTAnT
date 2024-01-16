@@ -10,7 +10,7 @@ setup(
     package_dir={
         'InSTAnT': 'InSTAnT',
     },
-  version = '1.0.2',      
+  version = '1.1',      
   license='MIT',        
   description = 'InSTAnT is a toolkit to identify gene pairs which are d-colocalized from single molecule measurement data.',   
   author = 'Anurendra Kumar, Bhavay Aggarwal',                   

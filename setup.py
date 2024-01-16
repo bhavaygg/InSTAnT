@@ -1,7 +1,7 @@
 
 from distutils.core import setup
 setup(
-  name = 'InSTAnT',         
+  name = 'sc-instant',         
   packages = ['sc-instant'],   
   version = '1.0',      
   license='MIT',        

@@ -27,4 +27,6 @@ setup(
     'Programming Language :: Python :: 3.5',
     'Programming Language :: Python :: 3.6',
   ],
+  long_description=open('README.md').read(),
+  long_description_content_type='text/markdown',
 )

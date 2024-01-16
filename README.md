@@ -23,6 +23,7 @@ This will create a new conda environment with the name `instant` and has all dep
 First we will initialise the Instant class object. This object will allow us to calculate the proximal pairs and find global colocalized genes. The primary argument is `threads` which controls the number of threads the program uses. If you run into memory issues with the default settings, we suggest setting the `precision_mode` to `low`. The arguments `min_intensity` and `min_area` are used only for MERFISH data preprocessing and can be skipped otherwise.
 
 ```
+from InSTAnT import Instant
 obj = Instant(threads = threads, precision_mode = 'high', min_intensity = 10**0.75, min_area = 3)
 ```
 

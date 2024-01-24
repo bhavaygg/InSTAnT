@@ -3,6 +3,8 @@ InSTAnT
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-C06524)](https://github.com/bhavaygg/InSTAnT/blob/main/LICENSE.txt)
 [![PyPI - Version](https://img.shields.io/pypi/v/hatch-fancy-pypi-readme.svg)](https://pypi.org/project/instant/)
+[![Downloads](https://pepy.tech/badge/pylfda)]([https://pepy.tech/project/pylfda](https://www.pepy.tech/projects/sc-instant))
+
 
 **InSTAnT** is a toolkit to identify gene pairs which are d-colocalized
 from single molecule measurement data e.g. MERFISH or SeqFISH. A gene
@@ -22,6 +24,12 @@ We recommend using our `environment.yml` file to create a new conda environment 
 conda env create -f environment.yml
 ```
 This will create a new conda environment with the name `instant` and has all dependancies installed. 
+
+Alternatively, the package can be installed using pip.
+
+```
+pip install sc-instant
+```
 
 First we will initialise the Instant class object. This object will allow us to calculate the proximal pairs and find global colocalized genes. The primary argument is `threads` which controls the number of threads the program uses. If you run into memory issues with the default settings, we suggest setting the `precision_mode` to `low`. The arguments `min_intensity` and `min_area` are used only for MERFISH data preprocessing and can be skipped otherwise.
 

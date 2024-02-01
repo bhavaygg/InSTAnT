@@ -2,7 +2,7 @@ InSTAnT
 =========
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-C06524)](https://github.com/bhavaygg/InSTAnT/blob/main/LICENSE.txt)
-[![PyPI - Version](https://img.shields.io/pypi/v/hatch-fancy-pypi-readme.svg)](https://pypi.org/project/instant/)
+[![PyPI - Version](https://img.shields.io/pypi/v/hatch-fancy-pypi-readme.svg)](https://pypi.org/project/sc-instant/)
 [![Downloads](https://pepy.tech/badge/sc-instant)](https://www.pepy.tech/projects/sc-instant)
 
 

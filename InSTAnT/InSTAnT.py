@@ -7,7 +7,6 @@ import numpy as np
 from pathlib import Path
 import multiprocessing as mp
 import matplotlib.pyplot as plt
-from InSTAnT.poibin import PoiBin
 from scipy.spatial import cKDTree
 from collections import Counter
 from scipy.stats import hypergeom
@@ -15,8 +14,15 @@ from scipy.stats import binom_test
 from scipy.optimize import minimize
 from sklearn.preprocessing import LabelEncoder
 from scipy.stats import multivariate_hypergeom
-from InSTAnT.poisson_binomial import PoissonBinomial
+# from InSTAnT.poisson_binomial import PoissonBinomial
+# from InSTAnT.poibin import PoiBin
+from poibin import PoiBin
+from poisson_binomial import PoissonBinomial
 import anndata as ad
+from gspan_mining.config import parser
+from gspan_mining.main import main
+import networkx as nx
+import os
 
 class ConditionalGlobalColocalization():
     '''
@@ -587,12 +593,114 @@ class DifferentialColocalization():
         all_pairs_g1_df = pd.DataFrame(all_pairs_g1, index = self.geneList)
         return all_pairs_cond_df, all_pairs_uncond_df, all_pairs_g1_df
 
+class CreateGraphFSM():
+    def __init__(self, filename, alpha=0.001, self_loop=False):
+        adata = ad.read_h5ad(filename)
+        self.alpha = alpha
+        self.all_p_val = adata.uns['pp_test_pvalues']
+        self.self_loop = self_loop
+        self.adj_matrices = self.adj_matrix_all_cells()
+        self.geneList = adata.uns['geneList']
+        del adata
+        self.create_graph_all()
+
+    def adj_matrix_all_cells(self):
+        adj_matrices = np.zeros(self.all_p_val.shape)
+        adj_matrices[self.all_p_val <= self.alpha] = 1
+        return adj_matrices
+
+    def create_graph_all(self):
+        num_cells = self.adj_matrices.shape[0]
+        myfile = open('graph.txt', 'w+')
+        for i in range(num_cells):
+            self.create_graph(i, myfile)
+        myfile.write("t # %d \n" %(-1))
+
+    def create_graph(self, i, myfile):
+        curr_adj_mat = self.adj_matrices[i,:,:]
+        if not self.self_loop:
+            np.fill_diagonal(curr_adj_mat, 0)
+        if (curr_adj_mat.sum()):
+            node_indices = range(curr_adj_mat.shape[0])
+            node_indices = [['v', node_indices[i], self.geneList[node_indices[i]]] for i in range(len(node_indices))]
+            myfile.write("t # %d \n" %(i))
+            np.savetxt(myfile, node_indices, delimiter=',', fmt='%s %s %s') 
+            [edge_x, edge_y] = np.nonzero(curr_adj_mat)
+            edge_indices = [['e', edge_x[i],edge_y[i],1] for i in range(len(edge_x))]
+            np.savetxt(myfile, edge_indices, delimiter=',', fmt= '%s %s %s %s') 
+
 class GeneModuleDiscovery():
     '''
-    TODO #Globalcolo MAP , Frequent subgraph mining(using gspan)
+    Frequent subgraph mining(using gspan)
     '''
-    def __init__(self) -> None:
-        pass
+    def __init__(self, n_vertices, topk_support, alpha, clique = True, n_edges = None, filename = None, fsm_name = None):
+        self.n_vertices = n_vertices
+        self.fsm_name = fsm_name
+        if clique == True:
+            self.n_edges = np.math.comb(n_vertices, 2)
+        else:
+            self.n_edges = n_edges
+        self.topk_support = topk_support
+        if not os.path.exists("graph.txt"):
+            print("Creating graph file")
+            CreateGraphFSM(filename, alpha)
+        adata = ad.read_h5ad(filename)
+        adata = self._run_gspan(adata)
+        adata.write(Path(filename), compression="gzip")
+    
+    def _is_clique(self, g):
+        vertices = g.vertices
+        deg_list = [len(vertices[v].edges) for v in vertices]
+        edge_count = int(np.sum(deg_list)//2)
+        v_count = len(vertices)
+        if edge_count == v_count*(v_count-1)/2:
+            return True
+        return False
+    
+    def _prob_format(self, g):
+        vertices = g.vertices
+        vertex_map = dict([(vertices[v].vid, vertices[v].vlb) for v in vertices])
+        edge_dict_lists = [vertices[v].edges for v in vertices]
+        all_edge_list = []
+        for edge_dict in edge_dict_lists:
+            for key in list(edge_dict.keys()):
+                new_edge = (edge_dict[key].frm, edge_dict[key].to)
+                all_edge_list.append(new_edge)
+        G = nx.from_edgelist(all_edge_list)
+        adj_mat = nx.to_numpy_array(G)
+        np.fill_diagonal(adj_mat, 0)
+        return vertex_map, adj_mat
+    
+    def _node_count(self, g):
+        vertices = g.vertices
+        return len(vertices)
+    
+    def _edge_count(self, g):
+        vertices = g.vertices
+        deg_list = [len(vertices[v].edges) for v in vertices]
+        edge_count = int(np.sum(deg_list)//2)
+        return edge_count
+    
+    def _run_gspan(self, adata):
+        args_str = f"graph.txt -s 5 -d False -p False -w False -t False -v False -l {self.n_vertices} -e {self.n_edges}"
+        FLAGS, _ = parser.parse_known_args(args=args_str.split())
+        gs = main(FLAGS)
+        filtered_subgraphs = gs.filtered_subgraphs
+        support_list = []
+        cliques = []
+        for g, support in filtered_subgraphs:
+            if self._edge_count(g) == self.n_edges and self._node_count(g) == self.n_vertices:
+                vertex_map, adj_mat  = self._prob_format(g)
+                cliques.append([support, ','.join(vertex_map.values()), self.n_edges])   
+                support_list.append(support)
+        sorted_cliques = sorted(cliques, key=lambda x: x[0], reverse=True)
+        support_list.sort(reverse=True)
+        df = pd.DataFrame(sorted_cliques, columns=["Support", "Vertices", "Number of Edges"])
+        if self.fsm_name == None:
+            adata.uns[f"nV{self.n_vertices}_cliques"] = df
+        else:
+            adata.uns[self.fsm_name] = df
+        return adata
 
 class Instant():
     '''
@@ -612,7 +720,7 @@ class Instant():
         else:
             self.precision_mode = np.float16
 
-    def load_preprocessed_data(self, data, inNucleus = False):
+    def load_preprocessed_data(self, data, adata_name = None, inNucleus = False):
         '''
         Load preprocessed data. Data can either be a '.csv' or a '.h5ad' file.
         If AnnData file is passed, the csv file is expected in `adata.uns['transcripts']`
@@ -629,8 +737,12 @@ class Instant():
             adata.obs_names = counts.index.values
             adata.var_names = counts.columns.values
             adata.uns["transcripts"] = self.df
-            adata.write(Path(self.filename).with_suffix('.h5ad'), compression="gzip")
-            self.filename = Path(self.filename).with_suffix('.h5ad')
+            if adata_name == None:
+                adata.write(Path(self.filename).with_suffix('.h5ad'), compression="gzip")
+                self.filename = Path(self.filename).with_suffix('.h5ad')
+            else:
+                self.filename = (Path(self.filename).parent / adata_name).with_suffix('.h5ad')
+                adata.write(Path(self.filename), compression="gzip")
             self.df = self.df.set_index('gene').sort_index()
         elif Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
@@ -640,7 +752,7 @@ class Instant():
             raise("Input File Format Incorrect")
         if inNucleus:
             self.df = self.df[self.df.inNucleus == 1]
-        self.geneList = self.df.index.unique()
+        self.geneList = np.unique(self.df.index)
         print("Loaded Data. Number of Transcripts: ", len(self.df), ", Number of Genes: ", len(self.geneList), 
               ", Number of Cells: ", len(self.df.uID.unique()))
     
@@ -892,11 +1004,11 @@ class Instant():
         for cell_i_result in results:
             self.all_pval[cell_i_result[0]] = cell_i_result[1]
             self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
-        print(f"Time to complete PP : ", timeit.default_timer() - check)
         if Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
             adata.obsm['genecount'] = self.all_gene_count
             adata.uns['pp_test_pvalues'] = self.all_pval
+            adata.uns['geneList'] = self.geneList
             adata.write(self.filename, compression="gzip")
         if pval_matrix_name:
             self._save_pval_matrix(pval_matrix_name)
@@ -959,11 +1071,11 @@ class Instant():
         for cell_i_result in results:
             self.all_pval[cell_i_result[0]] = cell_i_result[1]
             self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
-        print(f"Time to complete PP : ", timeit.default_timer() - check)
         if Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
             adata.obsm['genecount'] = self.all_gene_count
             adata.uns['pp_test_pvalues'] = self.all_pval
+            adata.uns['geneList'] = self.geneList
             adata.write(self.filename, compression="gzip")
         if pval_matrix_name:
             self._save_pval_matrix(pval_matrix_name)
@@ -1129,7 +1241,6 @@ class Instant():
         for cell_i_result in results:
             self.all_pval[cell_i_result[0]] = cell_i_result[1]
             self.all_gene_count[cell_i_result[0]] = cell_i_result[2]
-        print(f"Time to complete PP : ", timeit.default_timer() - check)
         if Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
             adata.obsm['genecount'] = self.all_gene_count
@@ -1322,3 +1433,20 @@ class Instant():
         if unstacked_pvals_name:
             self._save_unstacked_pvals(unstacked_pvals_name, alpha_cellwise, min_transcript)
         print(f"Cell-wise Global Colocalization Time : {round(timeit.default_timer() - start, 2)} seconds")
+
+    def run_fsm(self, n_vertices, alpha = 0.001, clique = True, n_edges = None, fsm_name = None):
+        '''
+        Finds networks of genes colocalized in many cells using gSpan(https://github.com/betterenvi/gSpan). FSM can be used to find networks with a pre-specified minimum size that are supported by a large number of cells
+        Requires `run_ProximalPairs()` be run first to generate the p-value matrix for all cells. Processes the p-value matrix to create a graph(saved as graph.txt) with edges based on alpha(p-value threshold).
+        Generates a dataframe with all such networks found.
+        Arguments: 
+            - n_vertices: (int) Minimum number of vertices in the network.
+            - alpha: (Float) (Float) pvalue signifcance threshold (>alpha_cellwise are converted to 1). Default = 0.001.
+            - clique: (Boolean) Forces networks found to be fully connected. Number of edges is number of vertices choose 2. Default = False.
+            - n_edges: (int) (Optional) Minimum number of edges in the network. Works only when clique == False.
+            - fsm_name: (String) (Optional) Name of adata.uns key to save output in. Be sure to specify if `run_fsm` is ran multiple times because it will overwrite. Default = "nV{x}_cliques" where x is the number of vertices.
+        '''
+        print(f"Running Frequent Subgraph Mining")
+        start = timeit.default_timer()
+        GeneModuleDiscovery(n_vertices = n_vertices, alpha = alpha, clique = clique, filename = self.filename, fsm_name = fsm_name, n_edges = n_edges)
+        print(f"Frequent Subgraph Mining Time : {round(timeit.default_timer() - start, 2)} seconds")

@@ -16,7 +16,7 @@ on a U2OS dataset. The dataset can be downloaded from here (Moffit et
 al., 2016, PNAS ) -
 http://zhuang.harvard.edu/MERFISHData/data_for_release.zip 
 
-### UPDATE: Added support for AnnData input/output.
+### UPDATE: Added support for AnnData input/output. Added Frequent Subgraph Mining.
 
 We recommend using our `environment.yml` file to create a new conda environment to avoid issues with package incompatibility.
 
@@ -195,3 +195,15 @@ The function will create a folder named `folder_name` in the `file_location` loc
     | Cbln1, Syt4     | 4.29E-36 | 1.55E-10  | 1.35E-32  | 2.1E-131        | 1.48E-17        | 2.1E-131 | 2       | 22      | 2        |
 
 (**Note** - For AnnData objects. These results are stored in `adata.uns['differential_colocalization']`. `adata.uns['differential_colocalization']` is a dictionary with keys based on the analysis done. For `1va` and `ava`, the key is `{cell_type}` and for `1v1`, the key is `{cell_type)_vs_{cell_type_2}`).
+
+### UPDATE: Frequent Subgraph Mining.
+
+Finds networks of genes colocalized in many cells using [gSpan](https://github.com/betterenvi/gSpan). The networks found are potential candidates for groups of cells and genes exhibiting interesting subcellular patterns, in this case colocalization.
+Such colocalization networks could potentially be underlying factors for specific biological processes.
+
+Arguments: 
+  - `n_vertices`: (int) Minimum number of vertices in the network.
+  - `alpha`: (Float) (Float) pvalue signifcance threshold (>alpha_cellwise are converted to 1). Default = 0.001.
+  - `clique`: (Boolean) Forces networks found to be fully connected. Number of edges is number of vertices choose 2. Default = False.
+  - `n_edges`: (int) (Optional) Minimum number of edges in the network. Works only when clique == False.
+  - `fsm_name`: (String) (Optional) Name of adata.uns key to save output in. Be sure to specify if `run_fsm` is ran multiple times because it will overwrite. Default = "nV{x}_cliques" where x is the number of vertices.

@@ -16,6 +16,9 @@ on a U2OS dataset. The dataset can be downloaded from here (Moffit et
 al., 2016, PNAS ) -
 http://zhuang.harvard.edu/MERFISHData/data_for_release.zip 
 
+Paper Preprint Link - https://pubmed.ncbi.nlm.nih.gov/36747718/
+
+
 ### UPDATE: Added support for AnnData input/output. Added Frequent Subgraph Mining.
 
 We recommend using our `environment.yml` file to create a new conda environment to avoid issues with package incompatibility.
@@ -201,9 +204,27 @@ The function will create a folder named `folder_name` in the `file_location` loc
 Finds networks of genes colocalized in many cells using [gSpan](https://github.com/betterenvi/gSpan). The networks found are potential candidates for groups of cells and genes exhibiting interesting subcellular patterns, in this case colocalization.
 Such colocalization networks could potentially be underlying factors for specific biological processes.
 
+```
+obj.run_fsm(n_vertices = 4, alpha = 0.001)
+```
+
 Arguments: 
-  - `n_vertices`: (int) Minimum number of vertices in the network.
-  - `alpha`: (Float) (Float) pvalue signifcance threshold (>alpha_cellwise are converted to 1). Default = 0.001.
-  - `clique`: (Boolean) Forces networks found to be fully connected. Number of edges is number of vertices choose 2. Default = False.
-  - `n_edges`: (int) (Optional) Minimum number of edges in the network. Works only when clique == False.
-  - `fsm_name`: (String) (Optional) Name of adata.uns key to save output in. Be sure to specify if `run_fsm` is ran multiple times because it will overwrite. Default = "nV{x}_cliques" where x is the number of vertices.
+  - `n_vertices`: *(int)* Minimum number of vertices in the network.
+  - `alpha`: *(Float)* *(Float)* pvalue signifcance threshold (>alpha_cellwise are converted to 1). Default = 0.001.
+  - `clique`: *(Boolean)* Forces networks found to be fully connected. Number of edges is number of vertices choose 2. Default = False.
+  - `n_edges`: *(int) *(Optional)* Minimum number of edges in the network. Works only when clique == False.
+  - `fsm_name`: *(String)* *(Optional)* Name of adata.uns key to save output in. Be sure to specify if `run_fsm` is ran multiple times because it will overwrite. Default = "nV{x}_cliques" where x is the number of vertices.
+
+THe function will create a dataframe in `adata.uns` with all the gene pair networks found. Ny default the key is `nV{x}_cliques` where x is the number of vertices but using the attribute `fsm_name` it can be changed. 
+
+## Citation 
+
+```
+@article{kumar2023intracellular,
+  title={Intracellular Spatial Transcriptomic Analysis Toolkit (InSTAnT)},
+  author={Kumar, Anurendra and Schrader, Alex W and Boroojeny, Ali Ebrahimpour and Asadian, Marisa and Lee, Juyeon and Song, You Jin and Zhao, Sihai Dave and Han, Hee-Sun and Sinha, Saurabh},
+  journal={Research Square},
+  year={2023},
+  publisher={American Journal Experts}
+}
+```

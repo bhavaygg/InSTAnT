@@ -10,20 +10,22 @@ import matplotlib.pyplot as plt
 from scipy.spatial import cKDTree
 from collections import Counter
 from scipy.stats import hypergeom
-from scipy.stats import binom_test
+from scipy.stats import binomtest
 from scipy.optimize import minimize
 from sklearn.preprocessing import LabelEncoder
 from scipy.stats import multivariate_hypergeom
-# from InSTAnT.poisson_binomial import PoissonBinomial
-# from InSTAnT.poibin import PoiBin
-from poibin import PoiBin
-from poisson_binomial import PoissonBinomial
+# from .poisson_binomial import PoissonBinomial
+# from .poibin import PoiBin
+from .poibin import PoiBin
+from .poisson_binomial import PoissonBinomial
+from .gspan_mining.config import parser
+from .gspan_mining.main import main
 import anndata as ad
-from gspan_mining.config import parser
-from gspan_mining.main import main
 import networkx as nx
 import os
 
+import psutil
+import sys
 class ConditionalGlobalColocalization():
     '''
         Performs conditional global colocalization
@@ -193,8 +195,11 @@ class ProximalPairs():
         p_vals = np.ones((len(self.geneList), len(self.geneList)))
         for i in range(self.obs.shape[0]):
             for j in range(i,self.obs.shape[1]):
-                p_vals[i,j] = binom_test(self.obs[i,j], self.num_trial[i,j], \
-                self.prob_null, alternative = 'greater')
+                if self.num_trial[i,j] >= 1:
+                    p_vals[i,j] = binomtest(self.obs[i,j], self.num_trial[i,j], \
+                    self.prob_null, alternative = 'greater').pvalue
+                else:
+                    p_vals[i,j] = 1
                 p_vals[j,i] = p_vals[i,j]
         return p_vals
 
@@ -215,7 +220,7 @@ class ProximalPairs():
         Count for each gene pair, the number of times they are proximal given the `distance_threshold`
         '''
         genecount = pd.DataFrame.from_dict(Counter(self.genes) , orient='index').reindex(self.geneList).fillna(0)
-        num_trial_pairs = np.dot(genecount, genecount.T)   #n1*n2  #using numpy here now
+        num_trial_pairs = np.dot(genecount, genecount.T).astype(np.int64)   #n1*n2  #using numpy here now
         return genecount, num_trial_pairs
 
     def obs_trial_pairs(self): #debug for large d
@@ -238,7 +243,7 @@ class ProximalPairs():
             obs_df = pd.DataFrame(0, self.geneList, self.geneList)
         temp= obs_df.values
         arr2 = temp + temp.T - temp*np.identity(len(temp))
-        return arr2
+        return arr2.astype(np.int64)
     
 class ProximalPairs3D():
     '''
@@ -292,14 +297,17 @@ class ProximalPairs3D():
             num_trial_all = np.zeros((len(self.geneList), len(self.geneList)))
             genecount_all = np.zeros(len(self.geneList))
             prob_null_all = 1      
-        return obs_all, num_trial_all, genecount_all, prob_null_all
+        return obs_all, num_trial_all.astype(np.int64), genecount_all.astype(np.int64), prob_null_all
 
     def compute_p_val(self):
         p_vals = np.ones((len(self.geneList), len(self.geneList)))
         for i in range(obs.shape[0]):
             for j in range(i, obs.shape[1]):
-                p_vals[i,j] = binom_test(obs[i,j], self.num_trial[i,j], \
-                self.prob_null, alternative = 'greater')
+                if self.num_trial[i,j] >= 1:
+                    p_vals[i,j] = binomtest(obs[i,j], self.num_trial[i,j], \
+                    self.prob_null, alternative = 'greater').pvalue
+                else:
+                    p_vals[i,j] = 1
                 p_vals[j,i] = p_vals[i,j]
         return p_vals
 
@@ -594,10 +602,10 @@ class DifferentialColocalization():
         return all_pairs_cond_df, all_pairs_uncond_df, all_pairs_g1_df
 
 class CreateGraphFSM():
-    def __init__(self, filename, alpha=0.001, self_loop=False):
+    def __init__(self, filename, distance_threshold, alpha=0.001, self_loop=False):
         adata = ad.read_h5ad(filename)
         self.alpha = alpha
-        self.all_p_val = adata.uns['pp_test_pvalues']
+        self.all_p_val = adata.uns[f'pp_test_d{distance_threshold}_pvalues']
         self.self_loop = self_loop
         self.adj_matrices = self.adj_matrix_all_cells()
         self.geneList = adata.uns['geneList']
@@ -633,17 +641,16 @@ class GeneModuleDiscovery():
     '''
     Frequent subgraph mining(using gspan)
     '''
-    def __init__(self, n_vertices, topk_support, alpha, clique = True, n_edges = None, filename = None, fsm_name = None):
+    def __init__(self, n_vertices, distance_threshold, alpha, clique = True, n_edges = None, filename = None, fsm_name = None):
         self.n_vertices = n_vertices
         self.fsm_name = fsm_name
         if clique == True:
             self.n_edges = np.math.comb(n_vertices, 2)
         else:
             self.n_edges = n_edges
-        self.topk_support = topk_support
         if not os.path.exists("graph.txt"):
             print("Creating graph file")
-            CreateGraphFSM(filename, alpha)
+            CreateGraphFSM(filename, alpha = alpha, distance_threshold = distance_threshold)
         adata = ad.read_h5ad(filename)
         adata = self._run_gspan(adata)
         adata.write(Path(filename), compression="gzip")
@@ -712,7 +719,8 @@ class Instant():
             - min_intensity: (Optional) (Integer) Minimum intensity for Merfish.
             - min_area: (Optional) (Integer) Minimum Area for Merfish.
     '''
-    def __init__(self, threads = 1, precision_mode = "high", min_intensity = 0, min_area = 0):
+    def __init__(self, distance_threshold, threads = 1, precision_mode = "high", min_intensity = 0, min_area = 0):
+        self.distance_threshold = distance_threshold
         self.min_intensity, self.min_area = min_intensity, min_area
         self.threads = threads
         if precision_mode:
@@ -720,7 +728,7 @@ class Instant():
         else:
             self.precision_mode = np.float16
 
-    def load_preprocessed_data(self, data, adata_name = None, inNucleus = False):
+    def load_preprocessed_data(self, data, adata_name = None, inNucleus = False, force_csv = False):
         '''
         Load preprocessed data. Data can either be a '.csv' or a '.h5ad' file.
         If AnnData file is passed, the csv file is expected in `adata.uns['transcripts']`
@@ -737,12 +745,13 @@ class Instant():
             adata.obs_names = counts.index.values
             adata.var_names = counts.columns.values
             adata.uns["transcripts"] = self.df
-            if adata_name == None:
-                adata.write(Path(self.filename).with_suffix('.h5ad'), compression="gzip")
-                self.filename = Path(self.filename).with_suffix('.h5ad')
-            else:
-                self.filename = (Path(self.filename).parent / adata_name).with_suffix('.h5ad')
-                adata.write(Path(self.filename), compression="gzip")
+            if force_csv == False:
+                if adata_name == None:
+                    adata.write(Path(self.filename).with_suffix('.h5ad'), compression="gzip")
+                    self.filename = Path(self.filename).with_suffix('.h5ad')
+                else:
+                    self.filename = (Path(self.filename).parent / adata_name).with_suffix('.h5ad')
+                    adata.write(Path(self.filename), compression="gzip")
             self.df = self.df.set_index('gene').sort_index()
         elif Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
@@ -1007,7 +1016,7 @@ class Instant():
         if Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
             adata.obsm['genecount'] = self.all_gene_count
-            adata.uns['pp_test_pvalues'] = self.all_pval
+            adata.uns[f'pp_test_d{self.distance_threshold}_pvalues'] = self.all_pval
             adata.uns['geneList'] = self.geneList
             adata.write(self.filename, compression="gzip")
         if pval_matrix_name:
@@ -1039,7 +1048,7 @@ class Instant():
         cell_ids = np.unique(self.df.uID)
         num_cells = len(cell_ids)
         num_genes = len(self.geneList)
-        print(f"Initialised PP now on {self.threads} threads")
+        print(f"Initialised PP-3D now on {self.threads} threads")
         print("Number of cells: ", num_cells, ", Number of Genes: ", num_genes)
         start = timeit.default_timer()
         valid_cell_data = []
@@ -1074,7 +1083,7 @@ class Instant():
         if Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
             adata.obsm['genecount'] = self.all_gene_count
-            adata.uns['pp_test_pvalues'] = self.all_pval
+            adata.uns[f'pp_test_d{self.distance_threshold}_pvalues'] = self.all_pval
             adata.uns['geneList'] = self.geneList
             adata.write(self.filename, compression="gzip")
         if pval_matrix_name:
@@ -1209,7 +1218,7 @@ class Instant():
         cell_ids = np.unique(self.df.uID)
         num_cells = len(cell_ids)
         num_genes = len(self.geneList)
-        print(f"Initialised PP-3D now on {self.threads} threads")
+        print(f"Initialised PP-3D slice now on {self.threads} threads")
         print("Number of cells: ", num_cells, ", Number of Genes: ", num_genes)
         start = timeit.default_timer()
         valid_cell_data = []
@@ -1234,7 +1243,7 @@ class Instant():
         share_pp3d_np = np.frombuffer(share_pp3d).reshape(position_matrix_3d.shape)
         np.copyto(share_pp3d_np, position_matrix_3d)
         print(f"Running PP-3D slice now on {self.threads} threads for, {len(valid_cell_data)} cells, {num_transcripts} transcripts")
-        with mp.Pool(processes=self.threads, initializer=self._initializer_func_pp, initargs=(position_matrix_3d, position_matrix_3d.shape), maxtasksperchild = 1) as pool:
+        with mp.pool.Pool(processes=self.threads, initializer=self._initializer_func_pp, initargs=(position_matrix_3d, position_matrix_3d.shape)) as pool:
             results = pool.map(self._calculate_ProximalPairs3D_slice, valid_cell_data)
         self.all_pval = np.ones((num_cells, len(self.geneList), len(self.geneList)), dtype = self.precision_mode)
         self.all_gene_count = np.zeros((num_cells, len(self.geneList)), dtype = self.precision_mode) 
@@ -1244,7 +1253,8 @@ class Instant():
         if Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
             adata.obsm['genecount'] = self.all_gene_count
-            adata.uns['pp_test_pvalues'] = self.all_pval
+            adata.uns[f'pp_test_d{self.distance_threshold}_pvalues'] = self.all_pval
+            adata.uns['geneList'] = self.geneList
             adata.write(self.filename, compression="gzip")
         if pval_matrix_name:
             self._save_pval_matrix(pval_matrix_name)
@@ -1275,7 +1285,7 @@ class Instant():
                     self.cell_locations = adata.uns['cell_locations']
                 except:
                     raise("Cell Locations file format incorrect")  
-            self.all_pval = adata.uns['pp_test_pvalues']
+            self.all_pval = adata.uns[f'pp_test_d{self.distance_threshold}_pvalues']
             self.all_gene_count = adata.obsm['genecount']
         binary_pp_pval = np.zeros(self.all_pval.shape)
         binary_pp_pval[self.all_pval < alpha] = 1
@@ -1314,11 +1324,17 @@ class Instant():
                     self.cell_labels['uID'] = self.cell_labels.index.values
                 except:
                     raise("Cell Label file format incorrect")        
-            self.all_pval = adata.uns['pp_test_pvalues']
+            self.all_pval = adata.uns[f'pp_test_d{self.distance_threshold}_pvalues']
             self.all_gene_count = adata.obsm['genecount']
             if 'differential_colocalization' not in adata.uns:
                 adata.uns['differential_colocalization'] = {}
             adata.write(self.filename, compression="gzip")
+        else:
+            if cell_labels != None:
+                if Path(cell_labels).suffix.lower() == ".csv":
+                    self.cell_labels = pd.read_csv(cell_labels)
+            else:
+                raise("Cell Label file format incorrect")
         start = timeit.default_timer()
         print(f"Running Differential Colocalization now on {self.threads} threads")
         if mode == "1va":
@@ -1416,7 +1432,7 @@ class Instant():
         print(f"Running Global Colocalization now on {self.threads} threads")
         if Path(self.filename).suffix.lower() == ".h5ad":
             adata = ad.read_h5ad(self.filename)
-            self.all_pval = adata.uns['pp_test_pvalues']
+            self.all_pval = adata.uns[f'pp_test_d{self.distance_threshold}_pvalues']
             self.all_gene_count = adata.obsm['genecount']
         start = timeit.default_timer()
         global_coloc_model = ConditionalGlobalColocalization(all_pvals = self.all_pval, transcript_count = self.all_gene_count, alpha_cellwise = alpha_cellwise, min_transcript = min_transcript, threads = self.threads, high_precision = high_precision, precision_mode = self.precision_mode)
@@ -1448,5 +1464,5 @@ class Instant():
         '''
         print(f"Running Frequent Subgraph Mining")
         start = timeit.default_timer()
-        GeneModuleDiscovery(n_vertices = n_vertices, alpha = alpha, clique = clique, filename = self.filename, fsm_name = fsm_name, n_edges = n_edges)
+        GeneModuleDiscovery(n_vertices = n_vertices, alpha = alpha, clique = clique, filename = self.filename, fsm_name = fsm_name, n_edges = n_edges, distance_threshold = self.distance_threshold)
         print(f"Frequent Subgraph Mining Time : {round(timeit.default_timer() - start, 2)} seconds")

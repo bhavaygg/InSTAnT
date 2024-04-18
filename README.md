@@ -78,7 +78,7 @@ Proximal Pairs calculation has 3 variants -
   - `run_ProximalPairs()` - Designed for 2D subcellular spatial transcriptomics data.
   - `run_ProximalPairs3D()` - Designed for 3D subcellular spatial transcriptomics data with continuos z-axis.
   - `run_ProximalPairs3D_slice()` - Designed for 3D subcellular spatial transcriptomics data with discrete/sliced z-axis.
-(**Note** - For AnnData objects. These results are stored in `adata.uns['pp_test_pvalues']`.)
+(**Note** - For AnnData objects. These results are stored in `adata.uns['pp_test_d{self.distance_threshold}_pvalues']`.)
 
 All subsequent analysis require `run_ProximalPairs()` to be run first to generate the p-value matrix for all cells.
 

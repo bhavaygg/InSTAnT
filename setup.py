@@ -1,12 +1,14 @@
 
 from distutils.core import setup
+from setuptools import find_packages
+
 
 with open('requirements.txt') as f:
     required = f.read().splitlines()
 
 setup(
   name = 'sc-instant',
-  packages=['InSTAnT'],
+  packages=find_packages(include=('InSTAnT/*',)),
     package_dir={
         'InSTAnT': 'InSTAnT',
     },

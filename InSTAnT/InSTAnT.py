@@ -24,8 +24,6 @@ import anndata as ad
 import networkx as nx
 import os
 
-import psutil
-import sys
 class ConditionalGlobalColocalization():
     '''
         Performs conditional global colocalization

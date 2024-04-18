@@ -26,7 +26,7 @@ We recommend using our `environment.yml` file to create a new conda environment 
 ```
 conda env create -f environment.yml
 ```
-This will create a new conda environment with the name `instant` and has all dependancies installed. 
+This will create a new conda environment with the name `instant` and has all dependencies installed. 
 
 Alternatively, the package can be installed using pip.
 
@@ -34,7 +34,7 @@ Alternatively, the package can be installed using pip.
 pip install sc-instant
 ```
 
-First we will initialise the Instant class object. This object will allow us to calculate the proximal pairs and find global colocalized genes. The primary argument is `threads` which controls the number of threads the program uses. If you run into memory issues with the default settings, we suggest setting the `precision_mode` to `low`. The arguments `min_intensity` and `min_area` are used only for MERFISH data preprocessing and can be skipped otherwise.
+First, we will initialize the Instant class object. This object will allow us to calculate the proximal pairs and find global colocalized genes. The primary argument is `threads` which controls the number of threads the program uses. If you run into memory issues with the default settings, we suggest setting the `precision_mode` to `low`. The arguments `min_intensity` and `min_area` are used only for MERFISH data preprocessing and can be skipped otherwise.
 
 ```
 from InSTAnT import Instant
@@ -76,9 +76,9 @@ obj.run_ProximalPairs(distance_threshold = 4, min_genecount = 20,
 ```
 Proximal Pairs calculation has 3 variants - 
   - `run_ProximalPairs()` - Designed for 2D subcellular spatial transcriptomics data.
-  - `run_ProximalPairs3D()` - Designed for 3D subcellular spatial transcriptomics data with continuos z-axis.
+  - `run_ProximalPairs3D()` - Designed for 3D subcellular spatial transcriptomics data with continous z-axis.
   - `run_ProximalPairs3D_slice()` - Designed for 3D subcellular spatial transcriptomics data with discrete/sliced z-axis.
-(**Note** - For AnnData objects. These results are stored in `adata.uns['pp_test_d{self.distance_threshold}_pvalues']`.)
+(**Note** - For AnnData objects. These results are stored in `adata.uns['pp_test_d{distance_threshold}_pvalues']`.)
 
 All subsequent analysis require `run_ProximalPairs()` to be run first to generate the p-value matrix for all cells.
 

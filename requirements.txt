@@ -15,5 +15,4 @@ scipy>=1.11.3
 threadpoolctl>=3.2.0
 pandas>=2.1.4
 anndata>=0.10.4
-gspan-mining>=0.2.3
 networkx>=3.2.1

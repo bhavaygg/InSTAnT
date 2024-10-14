@@ -12,6 +12,7 @@ al., 2016, PNAS ) -
 http://zhuang.harvard.edu/MERFISHData/data_for_release.zip 
 
 ### UPDATE: Added support for AnnData input/output.
+(**Note** - Tables below are for illustration purpose only).
 
 We recommend using our `environment.yml` file to create a new conda environment to avoid issues with package incompatibility.
 
@@ -83,21 +84,7 @@ obj.run_GlobalColocalization(
     unstacked_pvals_name = f"data/u2os/rep3/unstacked_global_pvals.csv")
 ```
 
-The final outputs are 3 CSV files - 
-  - Global colocalization:  contains pairwise significance value of d-colocalization
-    | gene          | 5830417i10rik | Aatf     | Abcc1    | Abhd2    |
-    | ------------- | ------------- | -------- | -------- | -------- |
-    | 5830417i10rik | 1             | 0.317506 | 1        | 1        |
-    | Aatf          | 0.317506      | 1        | 1        | 0.416612 |
-    | Abcc1         | 1             | 1        | 1        | 0.055185 |
-    | Abhd2         | 1             | 0.416612 | 0.055185 | 0.744798 |
-  - Expected colocalization:  contains pairwise significance value of expected d-colocalization
-    | gene          | 5830417i10rik | Aatf     | Abcc1    | Abhd2    |
-    | ------------- | ------------- | -------- | -------- | -------- |
-    | 5830417i10rik | 1.068986      | 1.978719 | 0.686994 | 0.999343 |
-    | Aatf          | 1.978719      | 4.877825 | 1.69975  | 2.344674 |
-    | Abcc1         | 0.686994      | 1.69975  | 0.795251 | 0.857116 |
-    | Abhd2         | 0.999343      | 2.344674 | 0.857116 | 1.358516 |
+The final outputs are 3 CSV files, the primary one being - 
   - Unstacked colocalization: contains pairwise significance value of d-colocalization in an interpretable format
     | g1g2          | gene_id1 | gene_id2 | p_val_cond | Expected coloc | Coloc. cells(Threshold<0.05) | Present cells | frac_cells |
     | ------------- | -------- | -------- | ---------- | -------------- | ---------------------------- | ------------- | ---------- |
@@ -109,7 +96,12 @@ The final outputs are 3 CSV files -
 
 (**Note** - For AnnData objects, only the unstacked file is saved in `adata.uns['cpb_results']`.)
 
-Next, we will use InSTAnT's spatial modulation analyses to find spatially modulated gene pairs. We use the `run_spatial_modulation()` function for this. The following arguments are used by `run_spatial_modulation()`
+Now, we will be running our analysis on the [Brain dataset](https://www.science.org/doi/10.1126/science.aau5324) by Mofitt et al. The subcellular dataset was obtained via personal communication.
+```
+obj.load_preprocessed_data(data = f'data/brain/data_processed.csv')
+```
+
+We will use InSTAnT's spatial modulation analyses to find spatially modulated gene pairs. We use the `run_spatial_modulation()` function for this. The following arguments are used by `run_spatial_modulation()`
   - `inter_cell_distance`: *(Float)* Maximum distance between cells at which they are considered proximal.
   - `cell_locations`: *(String)* *(Optional)* Path to file contains locations for each cell. Should be in sorted order. If not provided, cell locations are expected to be provided in `adata.uns['cell_locations']` in the AnnData file specified during initialization.
   - `spatial_modulation_name`: *(String)* *(Optional)* Path and name of the output Excel file.
@@ -157,8 +149,8 @@ Arguments:
  - `folder_name`: *(String) *(Optional)* if mode == "ava", folder name inside the specified path in which to store results for each cell type. Default = "differential_colocalization".
 ```
 obj.run_differentialcolocalization(cell_type = None, mode = "a2a", 
-     cell_labels = f"data/u2os/rep3/cell_labels.csv", 
-     file_location = f"data/u2os/rep3/",
+     cell_labels = f"data/brain/cell_labels.csv", 
+     file_location = f"data/brain/",
      folder_name = "differential_colocalization")
 ```
 The `cell_labels.csv` file must have 2 columns `uID` and `cell_type` which denote the cell number/ID and the type of the cell respectively.

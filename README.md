@@ -96,7 +96,7 @@ obj.run_GlobalColocalization(
     alpha_cellwise = 0.05,
     glob_coloc_name = f"data/u2os/rep3/global_colocalization.csv", 
     exp_coloc_name = f"data/u2os/rep3/expected_colocalization.csv", 
-    unstacked_pvals_name = f"data/u2os/rep3/unstacked_global_pvals.csv")
+    unstacked_pvals_name = f"data/u2os/rep3/unstacked_global_pvals.xlsx")
 ```
 
 The final outputs are 3 CSV files - 

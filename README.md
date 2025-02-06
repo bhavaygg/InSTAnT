@@ -221,11 +221,14 @@ THe function will create a dataframe in `adata.uns` with all the gene pair netwo
 ## Citation 
 
 ```
-@article{kumar2023intracellular,
-  title={Intracellular Spatial Transcriptomic Analysis Toolkit (InSTAnT)},
-  author={Kumar, Anurendra and Schrader, Alex W and Boroojeny, Ali Ebrahimpour and Asadian, Marisa and Lee, Juyeon and Song, You Jin and Zhao, Sihai Dave and Han, Hee-Sun and Sinha, Saurabh},
-  journal={Research Square},
-  year={2023},
-  publisher={American Journal Experts}
+@article{kumar2024intracellular,
+  title={Intracellular spatial transcriptomic analysis toolkit (InSTAnT)},
+  author={Kumar, Anurendra and Schrader, Alex W and Aggarwal, Bhavay and Boroojeny, Ali Ebrahimpour and Asadian, Marisa and Lee, JuYeon and Song, You Jin and Zhao, Sihai Dave and Han, Hee-Sun and Sinha, Saurabh},
+  journal={Nature communications},
+  volume={15},
+  number={1},
+  pages={7794},
+  year={2024},
+  publisher={Nature Publishing Group UK London}
 }
 ```

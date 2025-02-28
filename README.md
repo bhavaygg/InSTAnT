@@ -98,32 +98,8 @@ obj.run_GlobalColocalization(
     exp_coloc_name = f"data/u2os/rep3/expected_colocalization.csv", 
     unstacked_pvals_name = f"data/u2os/rep3/unstacked_global_pvals.xlsx")
 ```
+The function generates three CSV files. The primary file for the user is a data frame named "Unstacked Colocalization."
 
-The final outputs are 3 CSV files - 
-  - Global colocalization:  contains pairwise significance value of d-colocalization
-    | gene          | 5830417i10rik | Aatf     | Abcc1    | Abhd2    |
-    | ------------- | ------------- | -------- | -------- | -------- |
-    | 5830417i10rik | 1             | 0.317506 | 1        | 1        |
-    | Aatf          | 0.317506      | 1        | 1        | 0.416612 |
-    | Abcc1         | 1             | 1        | 1        | 0.055185 |
-    | Abhd2         | 1             | 0.416612 | 0.055185 | 0.744798 |
-  - Expected colocalization:  contains pairwise significance value of expected d-colocalization
-    | gene          | 5830417i10rik | Aatf     | Abcc1    | Abhd2    |
-    | ------------- | ------------- | -------- | -------- | -------- |
-    | 5830417i10rik | 1.068986      | 1.978719 | 0.686994 | 0.999343 |
-    | Aatf          | 1.978719      | 4.877825 | 1.69975  | 2.344674 |
-    | Abcc1         | 0.686994      | 1.69975  | 0.795251 | 0.857116 |
-    | Abhd2         | 0.999343      | 2.344674 | 0.857116 | 1.358516 |
-  - Unstacked colocalization: contains pairwise significance value of d-colocalization in an interpretable format
-    | g1g2          | gene_id1 | gene_id2 | p_val_cond | Expected coloc | Coloc. cells(Threshold<0.05) | Present cells | frac_cells |
-    | ------------- | -------- | -------- | ---------- | -------------- | ---------------------------- | ------------- | ---------- |
-    | Prpf8, Polr2a | Prpf8    | Polr2a   | \-2.5E-14  | 3.563221       | 112                          | 163           | 0.687117   |
-    | Col1a1, Fn1   | Col1a1   | Fn1      | \-2.4E-14  | 5.350136       | 107                          | 179           | 0.597765   |
-    | Fbln2, Fn1    | Fbln2    | Fn1      | \-1.7E-14  | 4.00996        | 74                           | 177           | 0.418079   |
-    | Col1a1, Fbln2 | Col1a1   | Fbln2    | \-1.7E-14  | 4.629268       | 73                           | 177           | 0.412429   |
-    | Col1a1, Bgn   | Col1a1   | Bgn      | \-1.6E-14  | 5.360849       | 71                           | 178           | 0.398876   |
-
-(**Note** - For AnnData objects, only the unstacked file is saved in `adata.uns['cpb_results']`.)
 
 Next, we will use InSTAnT's spatial modulation analyses to find spatially modulated gene pairs. We use the `run_spatial_modulation()` function for this. The following arguments are used by `run_spatial_modulation()`
   - `inter_cell_distance`: *(Float)* Maximum distance between cells at which they are considered proximal.
